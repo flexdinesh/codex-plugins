@@ -1,0 +1,20 @@
+{
+  "name": "local-codex-plugins",
+  "interface": {
+    "displayName": "Local Codex Plugins"
+  },
+  "plugins": [
+    {
+      "name": "tool-call-logger",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tool-call-logger"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

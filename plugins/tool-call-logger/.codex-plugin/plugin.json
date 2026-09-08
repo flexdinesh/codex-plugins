@@ -1,0 +1,11 @@
+{
+  "name": "tool-call-logger",
+  "version": "0.2.0",
+  "description": "Append full Codex tool events with runtime, Git, and session context to a local JSONL log.",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Tool Call Logger",
+    "shortDescription": "Append tool calls to a local log",
+    "category": "Developer Tools"
+  }
+}
