@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync,
-  renameSync, rmSync, symlinkSync, writeFileSync,
+  cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync,
+  renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -147,11 +147,30 @@ export function linkPlugin(root: string, name: string, options: LinkOptions = {}
   const catalog = check(root);
   if (!catalog.plugins.some((entry) => entry.name === name)) throw new Error(`unknown plugin: ${name}`);
   const source = realpathSync(join(root, 'plugins', name));
+  const version = readJson(join(source, '.codex-plugin/plugin.json')).version;
+  if (typeof version !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(version)) {
+    throw new Error('plugin version must be a safe cache directory name');
+  }
   const codexHome = expandHome(options.codexHome || process.env.CODEX_HOME || join(homedir(), '.codex'));
-  const destination = join(codexHome, 'plugins/cache', catalog.name, name, 'local');
+  const destination = join(codexHome, 'plugins/cache', catalog.name, name, version);
   const existing = lstatSync(destination, { throwIfNoEntry: false });
   if (existing?.isSymbolicLink()) {
     if (realpathSync(destination) !== source) throw new Error(`refusing to replace unrelated link: ${destination}`);
+    throw new Error(`Codex ignores symlink cache roots. Move this legacy link aside: ${destination}`);
+  }
+  const entries = existing?.isDirectory() ? readdirSync(destination) : [];
+  if (entries.includes('.codex-plugin') && entries.length > 1 && entries.every((entry) => {
+    const path = join(destination, entry);
+    if (entry === '.codex-plugin' && lstatSync(path).isDirectory()) return true;
+    return lstatSync(path).isSymbolicLink() && readlinkSync(path) === join(source, entry);
+  })) {
+    const metadata = join(destination, '.codex-plugin');
+    // Migrate earlier links: the loader rejects a symlinked manifest directory.
+    if (lstatSync(metadata).isSymbolicLink()) unlinkSync(metadata);
+    cpSync(join(source, '.codex-plugin'), metadata, { recursive: true });
+    for (const entry of readdirSync(source)) {
+      if (!entries.includes(entry)) symlinkSync(join(source, entry), join(destination, entry));
+    }
     console.log(`Already linked: ${destination} -> ${source}`);
     return;
   }
@@ -172,8 +191,17 @@ export function linkPlugin(root: string, name: string, options: LinkOptions = {}
   const backup = join(backupRoot, `${catalog.name}-${name}-${randomUUID()}`);
   renameSync(destination, backup);
   try {
-    symlinkSync(source, destination, 'dir');
+    // Codex requires real version and manifest directories. Runtime files stay linked.
+    mkdirSync(destination);
+    for (const entry of readdirSync(source)) {
+      if (entry === '.codex-plugin') {
+        cpSync(join(source, entry), join(destination, entry), { recursive: true });
+      } else {
+        symlinkSync(join(source, entry), join(destination, entry));
+      }
+    }
   } catch (error) {
+    rmSync(destination, { recursive: true, force: true });
     renameSync(backup, destination);
     throw error;
   }

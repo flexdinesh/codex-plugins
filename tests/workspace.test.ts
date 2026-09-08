@@ -18,8 +18,10 @@ function fixture(t: TestContext) {
   mkdirSync(dirname(join(root, CATALOG)), { recursive: true });
   cpSync(join(ROOT, CATALOG), join(root, CATALOG));
   const codexHome = join(temp, 'codex');
-  const cache = join(codexHome, 'plugins/cache/local-codex-plugins/tool-call-logger/local');
   const source = join(root, 'plugins/tool-call-logger');
+  const version = readJson(join(source, '.codex-plugin/plugin.json')).version;
+  assert.equal(typeof version, 'string');
+  const cache = join(codexHome, 'plugins/cache/local-codex-plugins/tool-call-logger', String(version));
   return { temp, root, codexHome, cache, source };
 }
 
@@ -79,11 +81,23 @@ test('link preserves installed copy, points to live source, and is idempotent', 
     ['plugin', 'marketplace', 'add', f.root],
     ['plugin', 'add', 'tool-call-logger@local-codex-plugins'],
   ]);
-  assert.ok(lstatSync(f.cache).isSymbolicLink());
-  assert.equal(realpathSync(f.cache), realpathSync(f.source));
-  writeFileSync(join(f.source, 'changed.txt'), 'live edit');
-  assert.equal(readFileSync(join(f.cache, 'changed.txt'), 'utf8'), 'live edit');
+  assert.ok(lstatSync(f.cache).isDirectory(), 'Codex discovery requires a real version directory');
+  assert.equal(lstatSync(f.cache).isSymbolicLink(), false);
+  for (const entry of readdirSync(f.source)) {
+    if (entry === '.codex-plugin') {
+      assert.ok(lstatSync(join(f.cache, entry)).isDirectory());
+      assert.equal(lstatSync(join(f.cache, entry)).isSymbolicLink(), false);
+      assert.deepEqual(readJson(join(f.cache, entry, 'plugin.json')), readJson(join(f.source, entry, 'plugin.json')));
+      continue;
+    }
+    assert.ok(lstatSync(join(f.cache, entry)).isSymbolicLink());
+    assert.equal(realpathSync(join(f.cache, entry)), realpathSync(join(f.source, entry)));
+  }
+  writeFileSync(join(f.source, 'scripts/changed.ts'), 'export const value = "live edit";');
+  assert.equal(readFileSync(join(f.cache, 'scripts/changed.ts'), 'utf8'), 'export const value = "live edit";');
+  writeFileSync(join(f.source, 'new-root-file.txt'), 'new entry');
   linkPlugin(f.root, 'tool-call-logger', options);
+  assert.equal(readFileSync(join(f.cache, 'new-root-file.txt'), 'utf8'), 'new entry');
   assert.equal(calls.length, 2);
   const backups = join(f.codexHome, 'plugins/local-link-backups');
   const names = readdirSync(backups);
@@ -91,6 +105,24 @@ test('link preserves installed copy, points to live source, and is idempotent', 
   const backup = names[0];
   assert.ok(backup);
   assert.ok(existsSync(join(backups, backup, '.codex-plugin/plugin.json')));
+});
+
+test('relink repairs symlinked manifests and refreshes manifest edits', (t) => {
+  const f = fixture(t);
+  mkdirSync(f.cache, { recursive: true });
+  for (const entry of readdirSync(f.source)) symlinkSync(join(realpathSync(f.source), entry), join(f.cache, entry));
+  const path = join(f.source, '.codex-plugin/plugin.json');
+  writeJson(path, { ...readJson(path), description: 'Updated manifest' });
+  linkPlugin(f.root, 'tool-call-logger', {
+    codexHome: f.codexHome, runCodex: () => assert.fail('already registered'),
+  });
+  assert.ok(lstatSync(join(f.cache, '.codex-plugin')).isDirectory());
+  assert.equal(readJson(join(f.cache, '.codex-plugin/plugin.json')).description, 'Updated manifest');
+  writeJson(path, { ...readJson(path), description: 'Refreshed again' });
+  linkPlugin(f.root, 'tool-call-logger', {
+    codexHome: f.codexHome, runCodex: () => assert.fail('already registered'),
+  });
+  assert.equal(readJson(join(f.cache, '.codex-plugin/plugin.json')).description, 'Refreshed again');
 });
 
 test('link refuses existing installs and unrelated links before invoking Codex', (t) => {
@@ -101,6 +133,19 @@ test('link refuses existing installs and unrelated links before invoking Codex',
   rmSync(f.cache, { recursive: true });
   symlinkSync(f.temp, f.cache, 'dir');
   assert.throws(() => linkPlugin(f.root, 'tool-call-logger', options), /unrelated link/);
+});
+
+test('link rejects versions that could escape the cache directory', (t) => {
+  const f = fixture(t);
+  const path = join(f.source, '.codex-plugin/plugin.json');
+  const manifest = readJson(path);
+  for (const version of ['../escape', '/tmp/escape', '.', '..']) {
+    writeJson(path, { ...manifest, version });
+    assert.throws(() => linkPlugin(f.root, 'tool-call-logger', {
+      codexHome: f.codexHome,
+      runCodex: () => assert.fail('must not invoke Codex'),
+    }), /safe cache directory/);
+  }
 });
 
 test('workspace CLI runs natively and rejects invalid invocations', () => {

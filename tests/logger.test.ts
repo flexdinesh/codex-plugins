@@ -2,14 +2,15 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import {
   cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
-  statSync, symlinkSync, writeFileSync, writeSync,
+  readdirSync, statSync, symlinkSync, writeFileSync, writeSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { appendEvent, parseEvent, stateDirectory } from '../plugins/tool-call-logger/scripts/log-tool-call.ts';
 import { collectMetadata } from '../plugins/tool-call-logger/scripts/context.ts';
+import { ensureState } from '../plugins/tool-call-logger/scripts/state.ts';
 import { object, readJson, ROOT } from '../scripts/workspace.ts';
 
 const plugin = join(ROOT, 'plugins/tool-call-logger');
@@ -84,6 +85,8 @@ test('40 concurrent processes preserve large records without loss or interleavin
   const results = await Promise.all(events.map(f.invoke));
   for (const result of results) assert.equal(result.code, 0, result.stderr);
   const actual = records(f.log).map((record) => object(record.event));
+  assert.deepEqual(readJson(join(f.directory, 'state.json')), { schema_version: 1, home_directory: homedir() });
+  assert.equal(readdirSync(f.directory).some((name) => name.endsWith('.tmp')), false);
   assert.equal(actual.length, events.length);
   assert.deepEqual(
     new Map(actual.map((value) => [value.tool_use_id, value])),
@@ -97,6 +100,30 @@ test('creates private state directory and file', async (t) => {
   assert.equal(result.code, 0, result.stderr);
   assert.equal(statSync(f.directory).mode & 0o777, 0o700);
   assert.equal(statSync(f.log).mode & 0o777, 0o600);
+  assert.equal(statSync(join(f.directory, 'state.json')).mode & 0o777, 0o600);
+});
+
+test('state preserves the original host home and never rewrites existing state or log bytes', (t) => {
+  const f = fixture(t);
+  ensureState(f.directory, '/Users/original');
+  const path = join(f.directory, 'state.json');
+  const initial = readFileSync(path);
+  const modified = statSync(path).mtimeMs;
+  writeFileSync(f.log, 'existing log bytes\n');
+  ensureState(f.directory, '/root');
+  assert.deepEqual(readFileSync(path), initial);
+  assert.equal(statSync(path).mtimeMs, modified);
+  assert.equal(readFileSync(f.log, 'utf8'), 'existing log bytes\n');
+});
+
+test('state creation failure is recorded without preventing tool logging', (t) => {
+  const f = fixture(t);
+  mkdirSync(join(f.directory, 'state.json'), { recursive: true });
+  appendEvent(event(), f.directory);
+  const record = records(f.log)[0];
+  assert.ok(record);
+  assert.deepEqual(record.event, event());
+  assert.match(JSON.stringify(object(record.metadata).errors), /state.json must be a regular file/);
 });
 
 test('preserves all Codex fields and records collector and transcript metadata', async (t) => {

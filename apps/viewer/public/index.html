@@ -155,11 +155,20 @@
               Reset
             </button>
           </div>
+          <div class="context-filters">
+            <label>Repository<select id="repository" aria-label="Filter by repository">
+              <option value="all">All repositories</option>
+            </select></label>
+            <label>Directory<select id="directory" aria-label="Filter by directory">
+              <option value="all">All directories</option>
+            </select></label>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>TOOL / INPUT</th>
+                  <th>REPOSITORY / DIRECTORY</th>
                   <th>STATUS</th>
                   <th>DURATION</th>
                   <th>SESSION</th>
@@ -216,6 +225,11 @@
       <h2 id="detail-tool"></h2>
       <div id="detail-status"></div>
       <dl id="metadata"></dl>
+      <details class="git-details">
+        <summary>Git snapshots</summary>
+        <p class="detail-note">Captured before and after this tool call. These describe the repository at the time of each hook.</p>
+        <div id="git-snapshots"></div>
+      </details>
       <div class="detail-tabs" role="tablist" aria-label="Call payload">
         <button id="tab-input" role="tab" aria-selected="true" type="button">
           Input</button

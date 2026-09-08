@@ -14,8 +14,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
-import { readLogs } from "../src/logs.ts";
-import { isSnapshot } from "../src/model.ts";
+import { groupCalls, readLogs } from "../src/logs.ts";
+import { callContext, displayPath, isSnapshot, matchesContext, recordContext, repositoryLabel } from "../src/model.ts";
+import type { LogRecord } from "../src/model.ts";
 import { createViewer } from "../src/server.ts";
 import { appendEvent } from '../../../plugins/tool-call-logger/scripts/log-tool-call.ts';
 
@@ -24,6 +25,37 @@ function fixture(t: TestContext) {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return { directory, path: join(directory, "tool-calls.jsonl") };
 }
+
+test("path labels shorten only the configured home directory, including a Docker host home", () => {
+  assert.equal(displayPath("/Users/alex/work/repo", "/Users/alex"), "~/work/repo");
+  assert.equal(displayPath("/Users/alex", "/Users/alex/"), "~");
+  assert.equal(displayPath("/Users/alex-other/repo", "/Users/alex"), "/Users/alex-other/repo");
+  assert.equal(displayPath("/Users/sam/repo", "/Users/alex"), "/Users/sam/repo");
+  assert.equal(displayPath("/logs/tool-calls.jsonl", "/Users/alex"), "/logs/tool-calls.jsonl");
+  assert.equal(displayPath("/work/repo"), "/work/repo");
+});
+
+test("repository labels use names and disambiguate identical names without changing filter keys", () => {
+  const roots = ["/Users/alex/repo", "/work/repo", "/work/another"];
+  assert.equal(repositoryLabel("/work/another", roots, "/Users/alex"), "another");
+  assert.equal(repositoryLabel(roots[0] ?? "", roots, "/Users/alex"), "repo — ~/repo");
+  assert.equal(repositoryLabel("/work/repo", roots, "/Users/alex"), "repo — /work/repo");
+});
+
+test("viewer reads mounted host state and tolerates missing or malformed state without modifying logs", async (t) => {
+  const f = fixture(t);
+  const state = join(f.directory, 'state.json');
+  const data = record();
+  writeFileSync(f.path, data);
+  assert.equal((await readLogs(f.path)).homeDirectory, undefined);
+  writeFileSync(state, JSON.stringify({ schema_version: 1, home_directory: '/Users/alex' }));
+  assert.equal((await readLogs(f.path)).homeDirectory, '/Users/alex');
+  writeFileSync(state, 'broken');
+  const snapshot = await readLogs(f.path);
+  assert.equal(snapshot.homeDirectory, undefined);
+  assert.equal(snapshot.calls.length, 1);
+  assert.equal(readFileSync(f.path, 'utf8'), data);
+});
 function record(
   phase = "PreToolUse",
   session = "s1",
@@ -46,6 +78,61 @@ function record(
     }) + "\n"
   );
 }
+
+test("Git details preserve before/after snapshots and use the latest captured state", () => {
+  const pre: LogRecord = {
+    logged_at: "2026-09-08T01:00:00Z",
+    event: { hook_event_name: "PreToolUse", cwd: "/work/repo/apps/viewer", tool_use_id: "1" },
+    metadata: { git: { root: "/work/repo", branch: "main", commit: "abc", dirty: false } },
+  };
+  const post: LogRecord = { ...pre, event: { ...pre.event, hook_event_name: "PostToolUse" },
+    metadata: { git: { root: "/work/repo", branch: "feature/viewer", commit: "def", dirty: true,
+      upstream: "origin/main", ahead_behind: "+2 -1", status_porcelain_v2: "? new file.ts\0" } } };
+  const call = groupCalls([pre, post])[0];
+  assert.ok(call);
+  assert.equal(recordContext(call.pre).dirty, false);
+  assert.equal(callContext(call).dirty, true);
+  assert.equal(callContext(call).branch, "feature/viewer");
+  assert.equal(callContext(call).commit, "def");
+  assert.equal(callContext(call).upstream, "origin/main");
+  assert.equal(callContext(call).divergence, "+2 -1");
+  assert.equal(recordContext(call.post).status, "? new file.ts\0");
+  assert.equal(callContext({ ...call, post: { ...post, metadata: undefined } }).branch, "main");
+  const unavailable = callContext({ ...call, post: { ...post,
+    metadata: { git: null, errors: [{ source: "git", message: "Git timed out" }] } } });
+  assert.equal(unavailable.root, "");
+  assert.equal(unavailable.dirty, null);
+  assert.equal(unavailable.error, "Git timed out");
+});
+
+test("repository and directory filters combine exact full paths, including missing metadata", () => {
+  const calls = groupCalls([
+    { logged_at: "2026-09-08T01:00:00Z", event: { hook_event_name: "PreToolUse", cwd: "/work/repo/app" },
+      metadata: { git: { root: "/work/repo" } } },
+    { logged_at: "2026-09-08T01:00:01Z", event: { hook_event_name: "PreToolUse", cwd: "/elsewhere/repo" },
+      metadata: { git: { root: "/elsewhere/repo" } } },
+    { logged_at: "2026-09-08T01:00:02Z", event: { hook_event_name: "PreToolUse", cwd: "/work/repo/lib" },
+      metadata: { git: { root: "/work/repo" } } },
+    { logged_at: "2026-09-08T01:00:03Z", event: { hook_event_name: "PreToolUse" } },
+  ]);
+  assert.equal(calls.filter((call) => matchesContext(call, "all", "/work/repo")).length, 2);
+  assert.equal(calls.filter((call) => matchesContext(call, "/work/repo/app", "/work/repo")).length, 1);
+  assert.equal(calls.filter((call) => matchesContext(call, "/work/repo/app", "/elsewhere/repo")).length, 0);
+  assert.equal(calls.filter((call) => matchesContext(call, "unknown", "unknown")).length, 1);
+  assert.equal(calls.filter((call) => matchesContext(call, "all", "all")).length, 4);
+});
+
+test("legacy and malformed Git metadata remain unknown and never imply a clean repository", () => {
+  const context = recordContext({ logged_at: "2026-09-08T01:00:00Z",
+    event: { hook_event_name: "PreToolUse" }, metadata: {
+      session_cwd: "/work/nested", git: { root: 12, branch: {}, dirty: "false" }, errors: [null, 3],
+    } });
+  assert.equal(context.directory, "/work/nested");
+  assert.equal(context.root, "");
+  assert.equal(context.branch, "");
+  assert.equal(context.dirty, null);
+  assert.equal(recordContext(null).dirty, null);
+});
 
 test("missing log gives an empty view without creating files", async (t) => {
   const f = fixture(t);
@@ -153,6 +240,7 @@ test("HTTP serves the app, browser JavaScript, live data, and read-only routes",
   assert.doesNotMatch(javascript, /import type/);
   const empty: unknown = await (await fetch(`${base}/api/logs`)).json();
   assert.ok(isSnapshot(empty));
+  assert.equal(empty.homeDirectory, undefined);
   assert.equal(empty.missing, true);
   writeFileSync(f.path, record());
   const updated: unknown = await (await fetch(`${base}/api/logs`)).json();

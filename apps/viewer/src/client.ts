@@ -1,4 +1,4 @@
-import { isObject, isSnapshot } from "./model.js";
+import { callContext, displayPath, isObject, isSnapshot, matchesContext, recordContext, repositoryLabel, repositoryName } from "./model.js";
 import type { Snapshot, ToolCall } from "./model.ts";
 
 function element(id: string): HTMLElement {
@@ -37,6 +37,7 @@ let selected: string | undefined;
 let tab = "input";
 let limit = 100;
 let returnFocus: HTMLElement | null = null;
+const pathLabel = (path: string) => displayPath(path, snapshot?.homeDirectory);
 
 function summary(call: ToolCall): string {
   if (isObject(call.input)) {
@@ -54,16 +55,19 @@ function badge(call: ToolCall): HTMLSpanElement {
     `status-pill ${call.status}`,
   );
 }
-function options(id: string, values: string[], label: string): void {
+function options(id: string, values: string[], label: string, unknownLabel = "Not recorded"): void {
   const select = input(id);
   if (!(select instanceof HTMLSelectElement)) return;
   const current = select.value;
   const sorted = [...new Set(values.filter(Boolean))].sort();
-  if (JSON.stringify(sorted) === select.dataset.values) return;
-  select.dataset.values = JSON.stringify(sorted);
+  const key = JSON.stringify([sorted, snapshot?.homeDirectory]);
+  if (key === select.dataset.values) return;
+  select.dataset.values = key;
   select.replaceChildren(
     new Option(label, "all"),
-    ...sorted.map((value) => new Option(value, value)),
+    ...sorted.map((value) => new Option(value === "unknown" ? unknownLabel
+      : id === "repository" ? repositoryLabel(value, sorted, snapshot?.homeDirectory)
+      : id === "directory" ? pathLabel(value) : value, value)),
   );
   select.value = sorted.includes(current) ? current : "all";
 }
@@ -72,16 +76,19 @@ function filtered(): ToolCall[] {
   const status = input("status").value;
   const tool = input("tool").value;
   const session = input("session").value;
+  const directory = input("directory").value;
+  const repository = input("repository").value;
   const range = input("range").value;
   const cutoff =
     range === "all" ? -Infinity : Date.now() - Number(range) * 3600_000;
   element("clear").hidden =
-    !query && [status, tool, session, range].every((value) => value === "all");
+    !query && [status, tool, session, range, directory, repository].every((value) => value === "all");
   return (snapshot?.calls ?? []).filter(
     (call) =>
       (status === "all" || call.status === status) &&
       (tool === "all" || call.tool === tool) &&
       (session === "all" || call.session === session) &&
+      matchesContext(call, directory, repository) &&
       Date.parse(call.time) >= cutoff &&
       (!query || JSON.stringify(call).toLowerCase().includes(query)),
   );
@@ -156,6 +163,8 @@ function render(): void {
     snapshot.calls.map((call) => call.session),
     "All sessions",
   );
+  options("repository", snapshot.calls.map((call) => callContext(call).root || "unknown"), "All repositories", "No repository recorded");
+  options("directory", snapshot.calls.map((call) => callContext(call).directory || "unknown"), "All directories", "No directory recorded");
   const calls = filtered();
   const completed = calls.filter((call) => call.status === "completed").length;
   const durations = calls
@@ -173,8 +182,8 @@ function render(): void {
   element("stat-awaiting").textContent = number(calls.length - completed);
   element("stat-duration").textContent = duration(median);
   element("shown-count").textContent = number(calls.length);
-  element("source").textContent = snapshot.source;
-  element("source").title = snapshot.source;
+  element("source").textContent = pathLabel(snapshot.source);
+  element("source").title = pathLabel(snapshot.source);
   element("demo").hidden = !snapshot.demo;
   element("event-count").textContent = `${number(snapshot.totalEvents)} events`;
   element("window-note").textContent = snapshot.truncated
@@ -209,6 +218,14 @@ function render(): void {
         text,
       );
       first.append(cell);
+      const context = callContext(call);
+      const repository = node("td", "", "repository-cell");
+      const name = repositoryName(context.root);
+      repository.append(
+        node("div", context.root ? `${name}${context.branch ? ` · ${context.branch}` : ""}` : "No repository recorded", "repository-name"),
+        node("div", pathLabel(context.directory) || "No directory recorded", "directory-path"),
+      );
+      repository.title = [pathLabel(context.root), context.branch, pathLabel(context.directory)].filter(Boolean).join("\n");
       const status = node("td");
       status.append(badge(call));
       const session = node("td");
@@ -222,6 +239,7 @@ function render(): void {
       session.title = call.session;
       row.append(
         first,
+        repository,
         status,
         node("td", duration(call.durationMs)),
         session,
@@ -268,18 +286,52 @@ function inspect(): void {
   document.body.style.overflow = "hidden";
   element("detail-tool").textContent = call.tool;
   element("detail-status").replaceChildren(badge(call));
+  const context = callContext(call);
   const fields = [
     ["Time", new Date(call.time).toLocaleString()],
     ["Duration", duration(call.durationMs)],
     ["Session", call.session || "Not recorded"],
     ["Turn", call.turn || "Not recorded"],
-    ["Directory", call.cwd || "Not recorded"],
+    ["Directory", pathLabel(context.directory) || "Not recorded"],
+    ["Repository", repositoryName(context.root) || "Not recorded"],
+    ["Branch", context.branch || "Not recorded"],
   ];
   element("metadata").replaceChildren(
     ...fields.flatMap(([label, value]) => [
       node("dt", label),
       node("dd", value),
     ]),
+  );
+  element("git-snapshots").replaceChildren(
+    ...[call.pre, call.post].map((record, index) => {
+      const section = node("section", "", "git-snapshot");
+      section.append(node("h3", index === 0 ? "Before tool" : "After tool"));
+      if (!record) {
+        section.append(node("p", "No matching hook event recorded.", "detail-note"));
+        return section;
+      }
+      const git = recordContext(record);
+      const details = node("dl");
+      const values = [
+        ["Directory", pathLabel(git.directory) || "Not recorded"],
+        ["Repository", repositoryName(git.root) || "Not recorded"],
+        ["Repo root", pathLabel(git.root) || "Not recorded"],
+        ["Branch", git.branch || "Not recorded"],
+        ["Commit", git.commit || "Not recorded"],
+        ["Upstream", git.upstream || "Not recorded"],
+        ["Ahead / behind", git.divergence || "Not recorded"],
+        ["Working tree", git.dirty === null ? "Unknown" : git.dirty ? "Has changes" : "Clean"],
+      ];
+      details.append(...values.flatMap(([label, value]) => [node("dt", label), node("dd", value)]));
+      section.append(details);
+      if (git.error) section.append(node("p", `Git unavailable: ${git.error}`, "git-error"));
+      if (git.status) {
+        const status = node("details", "", "git-status");
+        status.append(node("summary", "Recorded Git status"), node("pre", git.status.replaceAll("\0", "\n")));
+        section.append(status);
+      }
+      return section;
+    }),
   );
   for (const name of ["input", "output", "raw"])
     element(`tab-${name}`).setAttribute("aria-selected", String(tab === name));
@@ -308,13 +360,13 @@ function close(): void {
   if (returnFocus?.isConnected) returnFocus.focus();
   else input("search").focus();
 }
-for (const id of ["search", "status", "tool", "session", "range"])
+for (const id of ["search", "status", "tool", "session", "range", "directory", "repository"])
   input(id).addEventListener("input", () => {
     limit = 100;
     render();
   });
 element("clear").addEventListener("click", () => {
-  for (const id of ["status", "tool", "session", "range"])
+  for (const id of ["status", "tool", "session", "range", "directory", "repository"])
     input(id).value = "all";
   input("search").value = "";
   limit = 100;
@@ -360,7 +412,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Tab" && selected) {
     const focusable = Array.from(
       element("inspector").querySelectorAll<HTMLElement>(
-        'button,[tabindex="0"]',
+        'button,summary,[tabindex="0"]',
       ),
     );
     const first = focusable[0];

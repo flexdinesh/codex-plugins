@@ -2,6 +2,7 @@ export type JsonObject = Record<string, unknown>;
 export type LogRecord = {
   logged_at: string;
   event: JsonObject;
+  metadata?: unknown;
 };
 export type ToolCall = {
   id: string;
@@ -18,6 +19,7 @@ export type ToolCall = {
   post: LogRecord | null;
 };
 export type Snapshot = {
+  homeDirectory?: string;
   calls: ToolCall[];
   source: string;
   missing: boolean;
@@ -29,6 +31,56 @@ export type Snapshot = {
 
 export function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function displayPath(path: string, homeDirectory = ""): string {
+  const home = homeDirectory.replace(/\/+$/, "");
+  if (!home) return path;
+  if (path === home) return "~";
+  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}
+
+export function repositoryName(root: string): string {
+  return root.split("/").filter(Boolean).at(-1) || root;
+}
+
+export function repositoryLabel(root: string, roots: string[], homeDirectory = ""): string {
+  const name = repositoryName(root);
+  const duplicate = roots.some((other) => other !== root && repositoryName(other) === name);
+  return duplicate ? `${name} — ${displayPath(root, homeDirectory)}` : name;
+}
+
+export function recordContext(record: LogRecord | null) {
+  const metadata = isObject(record?.metadata) ? record.metadata : {};
+  const git = isObject(metadata.git) ? metadata.git : {};
+  const text = (value: unknown): string => typeof value === "string" ? value : "";
+  const errors = Array.isArray(metadata.errors) ? metadata.errors : [];
+  const gitError = errors.find((error: unknown) => isObject(error) && error.source === "git");
+  return {
+    directory: text(record?.event.cwd) || text(metadata.session_cwd),
+    root: text(git.root),
+    branch: text(git.branch),
+    commit: text(git.commit),
+    upstream: text(git.upstream),
+    divergence: text(git.ahead_behind),
+    dirty: typeof git.dirty === "boolean" ? git.dirty : null,
+    status: text(git.status_porcelain_v2),
+    error: text(git.error) || (isObject(gitError) ? text(gitError.message) : ""),
+  };
+}
+
+export function callContext(call: ToolCall) {
+  // Use the latest captured snapshot, including unavailable/failed Git reads.
+  // Legacy post-events without metadata can still use an enriched pre-event.
+  const record = call.post && isObject(call.post.metadata) ? call.post : call.pre ?? call.post;
+  const context = recordContext(record);
+  return { ...context, directory: context.directory || call.cwd };
+}
+
+export function matchesContext(call: ToolCall, directory: string, repository: string): boolean {
+  const context = callContext(call);
+  return (directory === "all" || directory === (context.directory || "unknown"))
+    && (repository === "all" || repository === (context.root || "unknown"));
 }
 
 export function isRecord(value: unknown): value is LogRecord {
@@ -64,6 +116,7 @@ export function isSnapshot(value: unknown): value is Snapshot {
   return (
     isObject(value) &&
     Array.isArray(value.calls) &&
+    (value.homeDirectory === undefined || typeof value.homeDirectory === "string") &&
     value.calls.every(isCall) &&
     typeof value.source === "string" &&
     typeof value.missing === "boolean" &&

@@ -34,8 +34,15 @@ pnpm run link tool-call-logger
 
 `pnpm run link` registers this directory as a **local** marketplace, installs the
 selected plugin through `codex plugin add`, preserves its initial cached copy
-under `~/.codex/plugins/local-link-backups/`, and replaces the cache entry with a
-symlink to `plugins/<name>` in this checkout. It respects an existing `CODEX_HOME`.
+under `~/.codex/plugins/local-link-backups/`, and links each cache entry's contents
+to `plugins/<name>` in this checkout. It respects an existing `CODEX_HOME`.
+The cache directory uses the plugin's manifest version, such as
+`plugins/cache/local-codex-plugins/tool-call-logger/0.2.0` inside Codex's home.
+Its root and `.codex-plugin/` must remain real directories: Codex rejects their
+symlinked equivalents. The manifest is copied during linking.
+Scripts and component directories are symlinks, so edits appear immediately.
+Re-run the link command after manifest edits or adding a new file or directory at
+a plugin's root. Restart Codex after changing definitions.
 This is a development helper around Codex's copy-based installer, not a native
 Codex link command. Nothing is uploaded.
 
@@ -64,6 +71,20 @@ pnpm viewer
 Open [the viewer](http://127.0.0.1:4317). It reads the logger's JSONL file, refreshes
 every two seconds, and shows activity charts, tool counts, paired-call durations,
 filters, and an inspector for inputs, results, and original hook events.
+Repository labels use the Git root folder name; duplicate names include their
+paths for clarity. Repository and directory filters use exact full paths and combine with the other
+filters. Paths under your home display as `~/…`; the logger records the host home
+in `state.json` beside the log, so this also works inside Docker. Raw events and filter
+values retain full paths. Each row shows its repository, branch, and directory; expand **Git
+snapshots** in the inspector for before/after commit, upstream, divergence,
+working-tree state, and recorded Git status. These are historical hook snapshots,
+not live Git queries. Missing metadata is shown as unknown; no plugin update is
+needed for existing enriched logs.
+
+The logger creates `state.json` once, privately and atomically, containing
+`{"schema_version":1,"home_directory":"/Users/yourname"}`. It never overwrites
+existing state. Metadata failures do not stop log appends. The viewer leaves paths
+unchanged if state is missing or invalid.
 
 The server defaults to `127.0.0.1` and never modifies the log. `HOST` overrides
 the bind address for containers. It honors
@@ -146,11 +167,11 @@ Codex's optional inline or multi-file manifest forms.
 Edit the source files here, then start a new Codex session/restart the app to
 reload definitions. Changed hook definitions may need review again. Do not move
 the checkout while it is linked. A Codex reinstall or update can replace the
-symlink with a cached copy; the helper refuses to overwrite existing installs
+links with cached copies; the helper refuses to overwrite existing installs
 or unrelated links. Move an existing cache copy aside before linking again.
 
 To stop logging, disable **Tool Call Logger** in Codex. To remove a linked
-installation, first unlink its cache symlink (only the link), then run:
+installation, run:
 
 ```sh
 codex plugin remove tool-call-logger@local-codex-plugins
@@ -217,5 +238,8 @@ private file creation, malformed inputs, write failures, symlink destinations,
 hook commands launched from unrelated working directories, scaffolding, and
 linking, standalone package loading, and short writes. Tests use temporary directories and simulate installation; they do not
 change your Codex configuration or production log.
+When the Codex CLI is installed, an integration test installs into a temporary
+Codex home and queries its real `hooks/list` API. It verifies both hooks load,
+remain untrusted, and execute successfully under fish when available.
 
 Plugin format: [OpenAI plugin packaging](https://developers.openai.com/plugins/build/plugins).

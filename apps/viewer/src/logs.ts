@@ -1,12 +1,30 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { isRecord } from "./model.ts";
+import { dirname, join } from "node:path";
+import { isObject, isRecord } from "./model.ts";
 import type { JsonObject, LogRecord, Snapshot, ToolCall } from "./model.ts";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_EVENTS = 2000;
+
+async function readHomeDirectory(source: string): Promise<string | undefined> {
+  let file: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    file = await open(join(dirname(source), "state.json"), constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+    const stat = await file.stat();
+    if (!stat.isFile() || stat.size > 4096) return;
+    const buffer = Buffer.alloc(4096);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    const state: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+    if (isObject(state) && state.schema_version === 1 && typeof state.home_directory === "string"
+      && state.home_directory.startsWith("/")) return state.home_directory;
+  } catch {
+    // Missing or invalid display metadata must never hide tool events.
+  } finally {
+    await file?.close();
+  }
+}
 
 export function logPath(): string {
   const override = process.env.CODEX_PLUGINS_STATE_DIR;
@@ -91,7 +109,9 @@ export async function readLogs(
   source: string,
   maxBytes = MAX_BYTES,
 ): Promise<Snapshot> {
+  const homeDirectory = await readHomeDirectory(source);
   const empty: Snapshot = {
+    ...(homeDirectory ? { homeDirectory } : {}),
     calls: [],
     source,
     missing: false,

@@ -520,7 +520,8 @@ kbd {
   padding: 1px 4px;
   color: #a9b2ab;
 }
-.filters select {
+.filters select,
+.context-filters select {
   height: 34px;
   max-width: 145px;
   background: #fff;
@@ -531,6 +532,43 @@ kbd {
   padding: 0 24px 0 9px;
   cursor: pointer;
 }
+.context-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 0 23px 17px;
+}
+.context-filters label {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 10px;
+  color: #6e7f72;
+}
+.context-filters select {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  width: 0;
+  text-overflow: ellipsis;
+}
+.repository-cell { max-width: 260px; }
+.repository-name,
+.directory-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.repository-name { color: #4f705b; font-size: 10px; }
+.directory-path { margin-top: 5px; font: 9px ui-monospace, monospace; color: #8c9a90; }
+.git-details { margin-bottom: 22px; border-bottom: 1px solid #e8ede5; padding-bottom: 18px; }
+.git-details summary { cursor: pointer; font-size: 12px; color: #4f705b; }
+.git-snapshot h3 { font-size: 11px; margin: 22px 0 0; }
+.git-snapshot dl { margin: 10px 0; grid-template-columns: 95px minmax(0, 1fr); }
+.git-error { color: #946b3f; font-size: 10px; line-height: 1.7; overflow-wrap: anywhere; }
+.git-status summary { font-size: 10px; }
 .text-button {
   background: none;
   color: #4c8666;

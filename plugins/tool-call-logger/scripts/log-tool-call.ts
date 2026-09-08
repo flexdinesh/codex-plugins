@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { collectMetadata } from './context.ts';
+import { ensureState } from './state.ts';
 
 export function stateDirectory(
   override = process.env.CODEX_PLUGINS_STATE_DIR,
@@ -37,6 +38,10 @@ export function appendEvent(
   const loggedAt = new Date().toISOString();
   const metadata = collectMetadata(event);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
+  try { ensureState(directory); }
+  catch (error) {
+    metadata.errors.push({ source: 'state', message: error instanceof Error ? error.message : String(error) });
+  }
   const data = Buffer.from(JSON.stringify({
     schema_version: 2,
     event_id: randomUUID(),
