@@ -1,8 +1,9 @@
 # Local Codex plugins
 
-A workspace for independent plugins loaded directly from this checkout. No
-publishing or build step. A pnpm monorepo with one package per plugin;
-runtime code uses Node built-ins only.
+A workspace for independent plugins loaded directly from this checkout. A pnpm
+monorepo with one package per plugin and app. Plugins need no publishing or build
+step; hooks and servers run native TypeScript using Node built-ins. The viewer
+frontend uses React and Vite.
 
 Requires macOS/Linux, Node.js 26, pnpm 11, and Codex with plugin and hook support.
 Catalog discovery verified with Codex CLI 0.153.4.
@@ -17,7 +18,10 @@ plugins/
     scripts/log-tool-call.ts      Append-only JSONL writer
 scripts/workspace.ts              Scaffold, validate, and link
 tests/                            Native Node test runner
-apps/viewer/                      Local web app for browsing tool-call logs
+apps/viewer/                      React/Vite app and native Node log API
+  src/client/                    React components, hooks, and CSS
+  src/server.ts                  API, Vite development middleware, built assets
+  src/model.ts                   Shared data types and validation
 pnpm-workspace.yaml               Workspace packages: plugins/* and apps/*
 tsconfig.json                     Strict, erasable-only TypeScript; no emit
 ```
@@ -28,6 +32,7 @@ From this directory:
 
 ```sh
 pnpm install
+pnpm --filter viewer test:install
 pnpm check
 pnpm run link tool-call-logger
 ```
@@ -68,7 +73,8 @@ symlinked installs can run independently of this repository.
 pnpm viewer
 ```
 
-Open [the viewer](http://127.0.0.1:4317). It reads the logger's JSONL file, refreshes
+This builds the frontend and starts the Node server. Open
+[the viewer](http://127.0.0.1:4317). It reads the logger's JSONL file, refreshes
 every two seconds, and shows activity charts, tool counts, paired-call durations,
 filters, and an inspector for inputs, results, and original hook events.
 Repository labels use the Git root folder name; duplicate names include their
@@ -92,18 +98,42 @@ the bind address for containers. It honors
 If no log exists yet, the app waits for the logger to create it.
 
 ```sh
-pnpm --filter viewer dev    # Restart on server module changes
-pnpm --filter viewer demo   # Preview with clearly labeled in-memory sample data
-pnpm --filter viewer test
+pnpm --filter viewer dev           # One port; React/CSS hot updates, Node watch
+pnpm --filter viewer dev --demo    # Development with labeled sample data
+pnpm --filter viewer build         # Create production assets in dist/
+pnpm --filter viewer start         # Serve an existing production build
+pnpm --filter viewer demo          # Build and preview labeled sample data
+pnpm --filter viewer test          # Build, Node tests, Chromium browser tests
+pnpm --filter viewer test:install  # Install Chromium once, or after upgrades
 ```
 
 The viewer reads at most the last 8 MiB and displays up to 2,000 valid events.
 Incomplete final lines wait for the next refresh; malformed records are skipped
 and counted. “Awaiting result” means no matching post-event in that window, which
 can also mean interrupted/denied calls or a window boundary. Durations measure
-hook timestamps, not exact tool runtime. Server and browser code are TypeScript;
-Node strips browser types when serving assets, with no separate build step.
-Restart the server and refresh the browser after editing HTML, CSS, or client code.
+hook timestamps, not exact tool runtime. Server and browser code are TypeScript.
+The backend runs directly on Node 26; Vite builds React TSX and CSS into `dist/`.
+Development uses Vite middleware on the same Node server and port. Production
+requires a build and does not load Vite or serve source files. Run `pnpm viewer`
+again after production source changes. Log polling waits two seconds after each
+request completes, times out after eight seconds, and retains the last successful
+view during connection failures.
+
+The React tree starts with `ViewerProvider`, which owns log/connection data,
+filters, pagination, selected call, and payload tab in one reducer. Snapshot
+updates reconcile filters and selection atomically. Feature components in
+`src/client/features/` connect the activity overview, call explorer, and inspector
+to separate state/action contexts; `components/` holds their rendering pieces.
+Filter logic is framework-independent under `state/`. Clipboard feedback remains
+local to its button, and dialog focus/scroll effects live in a dedicated hook;
+DOM refs are kept outside reducer state. `App` only composes the feature tree.
+
+Typography is defined in `src/client/styles.css`. Named `--font-size-*` tokens use
+`rem`, with an 81.25% root size (13px at the browser default). Ordinary text uses
+`1rem`; only captions and secondary text step below it, while headings and display
+values step upward. Browser text-size preferences scale the whole interface.
+Components consume those tokens instead of pixel font sizes. Tracking uses `em`
+and line heights are unitless, keeping both proportional to the active text size.
 
 ### Run with Docker Compose
 
@@ -124,9 +154,12 @@ docker compose down
 
 Equivalent pnpm scripts: `pnpm viewer:docker`, `pnpm viewer:docker:logs`, and
 `pnpm viewer:docker:stop`. `pnpm viewer:docker:build` builds the image alone.
-The Docker image includes Node 26 and runs TypeScript directly; host Node/pnpm
-are unnecessary when using Compose directly. Re-run the start command after
-source changes to rebuild.
+Docker builds the frontend in a separate stage with pnpm 11 and the workspace
+lockfile. The runtime image contains Node 26, native backend TypeScript, and built
+frontend assets; host Node/pnpm are unnecessary when using Compose directly.
+Re-run the start command after source changes to rebuild. The build context is
+the repository root, restricted by `.dockerignore` to viewer sources and build
+configuration.
 
 Compose mounts `~/.local/state/codex-plugins/` at `/logs` read-only and publishes
 only on `127.0.0.1`. New log records appear automatically. The directory must
@@ -150,7 +183,8 @@ pnpm workspace; `pnpm install` updates the lockfile. Edit
 `plugins/my-plugin/skills/my-plugin/SKILL.md` to define the
 workflow. Add hooks or an MCP server only when that plugin needs them.
 
-Run TypeScript directly with `node path/to/script.ts`. Use explicit `.ts` import
+For plugins, workspace scripts, and servers, run TypeScript directly with
+`node path/to/script.ts`. Use explicit `.ts` import
 extensions and `import type` for types. No enums, parameter properties, loaders,
 or transpilation. Node strips types but does not type-check; `pnpm typecheck`
 uses the root's development-only TypeScript and Node 26 type definitions.
@@ -231,8 +265,15 @@ audit of all tool paths. See [Codex tool coverage](https://learn.chatgpt.com/doc
 
 ## Checks
 
-`pnpm check` validates catalog/component paths, performs strict
-type-checking without emitting JavaScript, and runs `node --test`. Tests cover
+`pnpm check` validates catalog/component paths, performs strict Node and browser
+type-checking, runs `node --test`, builds the viewer, and runs Playwright Chromium
+tests. Run `pnpm --filter viewer test:install` after installing dependencies or
+upgrading Playwright; Linux CI may use
+`pnpm --filter viewer exec playwright install --with-deps chromium`.
+Browser tests use an isolated local demo server and mocked responses, never
+production logs. They exercise filtering, pagination, polling recovery, inspector
+keyboard/copy behavior, raw payload escaping, and responsive rendering.
+Node tests cover
 preservation of existing log bytes, concurrent processes with large records,
 private file creation, malformed inputs, write failures, symlink destinations,
 hook commands launched from unrelated working directories, scaffolding, and

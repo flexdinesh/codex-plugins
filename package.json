@@ -9,9 +9,9 @@
   },
   "scripts": {
     "check": "node scripts/workspace.ts check && pnpm typecheck && pnpm test",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.ts apps/*/tests/*.test.ts",
-    "viewer": "pnpm --filter viewer start",
+    "typecheck": "tsc --noEmit && pnpm --filter viewer typecheck",
+    "test": "node --test tests/*.test.ts && pnpm --filter viewer test",
+    "viewer": "pnpm --filter viewer build && pnpm --filter viewer start",
     "viewer:docker:build": "docker compose build viewer",
     "viewer:docker": "docker compose up --build -d --wait viewer",
     "viewer:docker:stop": "docker compose down",

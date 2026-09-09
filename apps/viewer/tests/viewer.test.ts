@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { request } from "node:http";
@@ -217,7 +218,7 @@ test("rejects non-file sources", async (t) => {
 
 test("HTTP serves the app, browser JavaScript, live data, and read-only routes", async (t) => {
   const f = fixture(t);
-  const server = createViewer({ source: f.path });
+  const server = await createViewer({ source: f.path });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(
@@ -232,11 +233,17 @@ test("HTTP serves the app, browser JavaScript, live data, and read-only routes",
   const base = `http://127.0.0.1:${address.port}`;
   const page = await fetch(base);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Call explorer/);
-  const client = await fetch(`${base}/client.js`);
+  const html = await page.text();
+  assert.match(html, /id="root"/);
+  assert.equal(page.headers.get("x-content-type-options"), "nosniff");
+  assert.match(page.headers.get("content-security-policy") ?? "", /script-src 'self';/);
+  const entry = html.match(/src="(\/assets\/[^" ]+\.js)"/)?.[1];
+  assert.ok(entry, "built HTML references a bundled entry");
+  const client = await fetch(`${base}${entry}`);
+  assert.equal(client.status, 200);
   assert.match(client.headers.get("content-type") ?? "", /javascript/);
   const javascript = await client.text();
-  assert.match(javascript, /from ["']\.\/model.js["']/);
+  assert.match(javascript, /Call explorer/);
   assert.doesNotMatch(javascript, /import type/);
   const empty: unknown = await (await fetch(`${base}/api/logs`)).json();
   assert.ok(isSnapshot(empty));
@@ -266,4 +273,78 @@ test("HTTP serves the app, browser JavaScript, live data, and read-only routes",
     },
   );
   assert.equal(foreignHost, 403);
+});
+
+async function listen(t: TestContext, options: Parameters<typeof createViewer>[0] = {}) {
+  const server = await createViewer(options);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => new Promise<void>((resolve, reject) => {
+    server.closeAllConnections();
+    server.close((error) => error ? reject(error) : resolve());
+  }));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+test("production fails clearly when its build is missing", async (t) => {
+  const f = fixture(t);
+  await assert.rejects(createViewer({ buildDirectory: f.directory }), /Viewer build missing.*pnpm --filter viewer build/);
+  writeFileSync(join(f.directory, "index.html"), "<div id='root'></div>");
+  await assert.rejects(createViewer({ buildDirectory: f.directory }), /Viewer assets missing/);
+});
+
+test("production serves only compiled assets and never follows symlinks", async (t) => {
+  const f = fixture(t);
+  mkdirSync(join(f.directory, "assets"));
+  writeFileSync(join(f.directory, "index.html"), "<div id='root'></div>");
+  writeFileSync(join(f.directory, "assets", "app.js"), "document.title = 'viewer'");
+  writeFileSync(join(f.directory, "assets", "app.js.map"), "private source");
+  writeFileSync(join(f.directory, "assets", "secret.json"), "private data");
+  writeFileSync(f.path, "private logs");
+  symlinkSync(f.path, join(f.directory, "assets", "linked.js"));
+  const base = await listen(t, { buildDirectory: f.directory, source: f.path });
+  assert.equal((await fetch(`${base}/assets/app.js`)).status, 200);
+  for (const path of ["/assets/app.js.map", "/assets/secret.json", "/assets/linked.js", "/src/server.ts", "/tool-calls.jsonl", "/client.js", "/assets/missing.js"]) {
+    assert.equal((await fetch(`${base}${path}`)).status, 404, path);
+  }
+  assert.equal((await fetch(`${base}/%ZZ`)).status, 400);
+});
+
+test("development transforms React with fresh CSP nonces and blocks backend files", async (t) => {
+  const f = fixture(t);
+  const base = await listen(t, { dev: true, source: f.path });
+  const page = await fetch(base);
+  const html = await page.text();
+  assert.equal(page.status, 200);
+  assert.match(html, /\/@vite\/client/);
+  assert.match(html, /\/@react-refresh/);
+  const nonce = html.match(/nonce="([^"]+)"/)?.[1];
+  assert.ok(nonce);
+  assert.notEqual(nonce, "__VIEWER_CSP_NONCE__");
+  assert.ok(page.headers.get("content-security-policy")?.includes(`'nonce-${nonce}'`));
+  const nextPage = await fetch(base);
+  assert.notEqual((await nextPage.text()).match(/nonce="([^"]+)"/)?.[1], nonce);
+  const client = await fetch(`${base}/src/client/main.tsx`);
+  assert.equal(client.status, 200);
+  assert.match(client.headers.get("content-type") ?? "", /javascript/);
+  assert.equal((await fetch(`${base}/@vite/client`)).status, 200);
+  assert.equal((await fetch(`${base}/@react-refresh`)).status, 200);
+  assert.ok(isSnapshot(await (await fetch(`${base}/api/logs`)).json()));
+  for (const path of ["/src/server.ts", "/src/logs.ts?raw", "/src/demo.ts", "/package.json", "/vite.config.ts", "/tests/viewer.test.ts", "/.env", "/@fs/etc/passwd", "/src/client/%2e%2e%2fserver.ts", "/node_modules/.vite/deps/_metadata.json"]) {
+    assert.equal((await fetch(`${base}${path}`)).status, 404, path);
+  }
+  assert.equal((await fetch(`${base}/src/model.ts`, { method: "POST" })).status, 405);
+  for (const origin of ["http://untrusted.example", "http://localhost:1234"]) {
+    await assert.rejects(new Promise<void>((resolve, reject) => {
+      const req = request(`${base}/`, {
+        headers: { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Protocol": "vite-ping", Origin: origin },
+      });
+      req.on("upgrade", (_response, socket) => { socket.destroy(); resolve(); });
+      req.on("error", reject);
+      req.setTimeout(2000, () => req.destroy(new Error("Unexpected websocket timeout")));
+      req.end();
+    }), /socket hang up/);
+  }
 });

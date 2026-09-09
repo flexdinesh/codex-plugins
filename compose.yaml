@@ -1,6 +1,8 @@
 services:
   viewer:
-    build: ./apps/viewer
+    build:
+      context: .
+      dockerfile: apps/viewer/Dockerfile
     init: true
     restart: unless-stopped
     read_only: true
