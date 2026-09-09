@@ -73,8 +73,8 @@ symlinked installs can run independently of this repository.
 pnpm viewer
 ```
 
-This builds the frontend and starts the Node server. Open
-[the viewer](http://127.0.0.1:4317). It reads the logger's JSONL file, refreshes
+This builds the frontend and starts the Node server. Open any interface URL printed
+in the terminal, such as [the local viewer](http://127.0.0.1:4317). It reads the logger's JSONL file, refreshes
 every two seconds, and shows activity charts, tool counts, paired-call durations,
 filters, and an inspector for inputs, results, and original hook events.
 Repository labels use the Git root folder name; duplicate names include their
@@ -92,8 +92,10 @@ The logger creates `state.json` once, privately and atomically, containing
 existing state. Metadata failures do not stop log appends. The viewer leaves paths
 unchanged if state is missing or invalid.
 
-The server defaults to `127.0.0.1` and never modifies the log. `HOST` overrides
-the bind address for containers. It honors
+The server defaults to `0.0.0.0`, prints every IPv4 interface URL, and never modifies
+the log. This exposes raw tool inputs and results to the local network; set
+`HOST=127.0.0.1` to restrict access to this machine. `HOST` overrides the bind address.
+It honors
 `CODEX_PLUGINS_STATE_DIR`; `PORT` overrides the default port of `4317`.
 If no log exists yet, the app waits for the logger to create it.
 
@@ -162,7 +164,7 @@ the repository root, restricted by `.dockerignore` to viewer sources and build
 configuration.
 
 Compose mounts `~/.local/state/codex-plugins/` at `/logs` read-only and publishes
-only on `127.0.0.1`. New log records appear automatically. The directory must
+on every IPv4 interface. New log records appear automatically. The directory must
 exist; Compose will not create it as root. For another directory, set
 `CODEX_PLUGINS_STATE_DIR` to its absolute path before starting Compose. The
 container uses root to read the logger's private file permissions, with a

@@ -18,7 +18,7 @@ import type { TestContext } from "node:test";
 import { groupCalls, readLogs } from "../src/logs.ts";
 import { callContext, displayPath, isSnapshot, matchesContext, recordContext, repositoryLabel } from "../src/model.ts";
 import type { LogRecord } from "../src/model.ts";
-import { createViewer } from "../src/server.ts";
+import { createViewer, interfaceUrls } from "../src/server.ts";
 import { appendEvent } from '../../../plugins/tool-call-logger/scripts/log-tool-call.ts';
 
 function fixture(t: TestContext) {
@@ -26,6 +26,17 @@ function fixture(t: TestContext) {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return { directory, path: join(directory, "tool-calls.jsonl") };
 }
+
+test("lists every IPv4 interface as a reachable viewer URL", () => {
+  assert.deepEqual(interfaceUrls(4317, {
+    lo0: [{ address: "127.0.0.1", family: "IPv4" }, { address: "::1", family: "IPv6" }],
+    en0: [{ address: "192.168.1.12", family: "IPv4" }],
+    en1: undefined,
+  }), [
+    { name: "lo0", url: "http://127.0.0.1:4317" },
+    { name: "en0", url: "http://192.168.1.12:4317" },
+  ]);
+});
 
 test("path labels shorten only the configured home directory, including a Docker host home", () => {
   assert.equal(displayPath("/Users/alex/work/repo", "/Users/alex"), "~/work/repo");
@@ -273,6 +284,15 @@ test("HTTP serves the app, browser JavaScript, live data, and read-only routes",
     },
   );
   assert.equal(foreignHost, 403);
+  const ipHost = await new Promise<number | undefined>((resolve, reject) => {
+    const req = request(`${base}/api/logs`, { headers: { Host: "192.168.1.12:4317" } }, (response) => {
+      response.resume();
+      resolve(response.statusCode);
+    });
+    req.on("error", reject);
+    req.end();
+  });
+  assert.equal(ipHost, 200);
 });
 
 async function listen(t: TestContext, options: Parameters<typeof createViewer>[0] = {}) {

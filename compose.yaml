@@ -9,7 +9,7 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      - "127.0.0.1:${PORT:-4317}:4317"
+      - "0.0.0.0:${PORT:-4317}:4317"
     # Root can read the logger's private 0700 directory / 0600 files on Linux.
     # The bind mount prevents writes regardless of the container user.
     volumes:

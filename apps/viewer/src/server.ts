@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
+import { isIP } from "node:net";
+import { networkInterfaces } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { demoSnapshot } from "./demo.ts";
@@ -10,12 +12,34 @@ import type { ViteDevServer } from "vite";
 
 const root = resolve(import.meta.dirname, "..");
 const noncePlaceholder = "__VIEWER_CSP_NONCE__";
-const localHost = /^(127\.0\.0\.1|localhost)(:\d+)?$/;
 const contentTypes = new Map([
   [".html", "text/html"], [".js", "text/javascript"], [".css", "text/css"],
   [".svg", "image/svg+xml"], [".png", "image/png"], [".jpg", "image/jpeg"],
   [".webp", "image/webp"], [".ico", "image/x-icon"], [".woff2", "font/woff2"],
 ]);
+
+function allowedHost(host: string): boolean {
+  try {
+    const hostname = new URL(`http://${host}`).hostname;
+    const unwrapped = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+    return unwrapped === "localhost" || isIP(unwrapped) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+export function interfaceUrls(
+  port: number,
+  interfaces: Readonly<Record<string, readonly { address: string; family: string }[] | undefined>> = networkInterfaces(),
+): { name: string; url: string }[] {
+  const urls: { name: string; url: string }[] = [];
+  for (const [name, addresses] of Object.entries(interfaces)) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4") urls.push({ name, url: `http://${address.address}:${port}` });
+    }
+  }
+  return urls;
+}
 
 function productionAssets(directory: string) {
   const assets = new Map<string, { type: string; body: Buffer }>();
@@ -71,11 +95,11 @@ export async function createViewer(
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader(
       "Content-Security-Policy",
-      `default-src 'self'; script-src 'self'${vite ? ` 'nonce-${nonce}'` : ""}; style-src 'self'${vite ? ` 'nonce-${nonce}'` : ""}; connect-src 'self'${vite && localHost.test(host) ? ` ws://${host}` : ""}; frame-ancestors 'none'; base-uri 'none'`,
+      `default-src 'self'; script-src 'self'${vite ? ` 'nonce-${nonce}'` : ""}; style-src 'self'${vite ? ` 'nonce-${nonce}'` : ""}; connect-src 'self'${vite && allowedHost(host) ? ` ws://${host}` : ""}; frame-ancestors 'none'; base-uri 'none'`,
     );
-    // The app contains raw local tool arguments. Reject alternate hostnames/DNS rebinding.
-    if (!localHost.test(host)) {
-      response.writeHead(403).end("Local access only");
+    // The app contains raw local tool arguments. Accept literal IPs but reject DNS rebinding hostnames.
+    if (!allowedHost(host)) {
+      response.writeHead(403).end("IP access only");
       return;
     }
     if (request.method !== "GET") {
@@ -134,7 +158,7 @@ export async function createViewer(
     // Check upgrades before Vite's websocket handler, including its HMR ping route.
     server.on("upgrade", (request, socket) => {
       const host = request.headers.host ?? "";
-      if (!localHost.test(host) || request.headers.origin !== `http://${host}`) socket.destroy();
+      if (!allowedHost(host) || request.headers.origin !== `http://${host}`) socket.destroy();
     });
     const { createServer: createViteServer } = await import("vite");
     viteEnvironment = `/@fs${fileURLToPath(new URL("../client/env.mjs", import.meta.resolve("vite")))}`;
@@ -164,7 +188,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT must be between 1 and 65535");
   const demo = process.argv.includes("--demo");
   const dev = process.argv.includes("--dev");
-  const host = process.env.HOST ?? "127.0.0.1";
+  const host = process.env.HOST ?? "0.0.0.0";
   const server = await createViewer({ demo, dev });
   server.on("error", (error) => {
     console.error(`viewer: ${error.message}`);
@@ -176,5 +200,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       process.exitCode = error ? 1 : 0;
     }));
   }
-  server.listen(port, host, () => console.log(`Viewer: http://${host}:${port}${demo ? " (demo data)" : ""}${dev ? " (development)" : ""}`));
+  server.listen(port, host, () => {
+    const urls = host === "0.0.0.0" ? interfaceUrls(port) : [{ name: host, url: `http://${host}:${port}` }];
+    console.log(`Viewer${demo ? " (demo data)" : ""}${dev ? " (development)" : ""}:`);
+    for (const entry of urls) console.log(`  ${entry.name}: ${entry.url}`);
+  });
 }
