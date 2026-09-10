@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { spawn } from "node:child_process";
 import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
@@ -39,6 +40,33 @@ export function interfaceUrls(
     }
   }
   return urls;
+}
+
+export function browserUrl(host: string, port: number): string {
+  return `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}`;
+}
+
+type BrowserLauncher = (command: string, args: readonly string[]) => void;
+
+function browserCommand(platform: NodeJS.Platform): string | undefined {
+  if (platform === "darwin") return "open";
+  if (platform === "linux") return "xdg-open";
+  return undefined;
+}
+
+export function openBrowser(
+  url: string,
+  platform: NodeJS.Platform = process.platform,
+  launch: BrowserLauncher = (command, args) => {
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    child.on("error", (error) => console.error(`viewer: unable to open browser: ${error.message}`));
+    child.unref();
+  },
+): boolean {
+  const command = browserCommand(platform);
+  if (!command) return false;
+  launch(command, [url]);
+  return true;
 }
 
 function productionAssets(directory: string) {
@@ -204,5 +232,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const urls = host === "0.0.0.0" ? interfaceUrls(port) : [{ name: host, url: `http://${host}:${port}` }];
     console.log(`Viewer${demo ? " (demo data)" : ""}${dev ? " (development)" : ""}:`);
     for (const entry of urls) console.log(`  ${entry.name}: ${entry.url}`);
+    if (!openBrowser(browserUrl(host, port))) console.warn("viewer: automatic browser opening unavailable");
   });
 }

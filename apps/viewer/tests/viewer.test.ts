@@ -18,7 +18,7 @@ import type { TestContext } from "node:test";
 import { groupCalls, readLogs } from "../src/logs.ts";
 import { callContext, displayPath, isSnapshot, matchesContext, recordContext, repositoryLabel } from "../src/model.ts";
 import type { LogRecord } from "../src/model.ts";
-import { createViewer, interfaceUrls } from "../src/server.ts";
+import { browserUrl, createViewer, interfaceUrls, openBrowser } from "../src/server.ts";
 import { appendEvent } from '../../../plugins/tool-call-logger/scripts/log-tool-call.ts';
 
 function fixture(t: TestContext) {
@@ -293,6 +293,19 @@ test("HTTP serves the app, browser JavaScript, live data, and read-only routes",
     req.end();
   });
   assert.equal(ipHost, 200);
+});
+
+test("opens the local viewer URL with the platform browser opener", () => {
+  assert.equal(browserUrl("0.0.0.0", 4317), "http://127.0.0.1:4317");
+  assert.equal(browserUrl("127.0.0.1", 4318), "http://127.0.0.1:4318");
+
+  const opened: { command: string; args: string[] }[] = [];
+  assert.equal(openBrowser("http://127.0.0.1:4317", "linux", (command, args) => opened.push({ command, args: [...args] })), true);
+  assert.deepEqual(opened, [{ command: "xdg-open", args: ["http://127.0.0.1:4317"] }]);
+  assert.equal(openBrowser("http://127.0.0.1:4317", "darwin", (command, args) => opened.push({ command, args: [...args] })), true);
+  assert.deepEqual(opened[1], { command: "open", args: ["http://127.0.0.1:4317"] });
+  assert.equal(openBrowser("http://127.0.0.1:4317", "win32", (command, args) => opened.push({ command, args: [...args] })), false);
+  assert.equal(opened.length, 2);
 });
 
 async function listen(t: TestContext, options: Parameters<typeof createViewer>[0] = {}) {
