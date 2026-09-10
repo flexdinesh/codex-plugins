@@ -46,6 +46,10 @@ export function browserUrl(host: string, port: number): string {
   return `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}`;
 }
 
+export function shouldOpenBrowser(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.SSH_CONNECTION === undefined && environment.SSH_TTY === undefined;
+}
+
 type BrowserLauncher = (command: string, args: readonly string[]) => void;
 
 function browserCommand(platform: NodeJS.Platform): string | undefined {
@@ -232,6 +236,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const urls = host === "0.0.0.0" ? interfaceUrls(port) : [{ name: host, url: `http://${host}:${port}` }];
     console.log(`Viewer${demo ? " (demo data)" : ""}${dev ? " (development)" : ""}:`);
     for (const entry of urls) console.log(`  ${entry.name}: ${entry.url}`);
-    if (!openBrowser(browserUrl(host, port))) console.warn("viewer: automatic browser opening unavailable");
+    if (!shouldOpenBrowser()) {
+      console.log("viewer: SSH session detected; skipping automatic browser opening");
+    } else if (!openBrowser(browserUrl(host, port))) {
+      console.warn("viewer: automatic browser opening unavailable");
+    }
   });
 }
