@@ -10,10 +10,10 @@ import { collectMetadata } from './context.ts';
 import { ensureState } from './state.ts';
 
 export function stateDirectory(
-  override = process.env.CODEX_PLUGINS_STATE_DIR,
+  override = process.env.TOOL_LOGGER_STATE_DIR,
   userHome = homedir(),
 ): string {
-  if (!override) return join(userHome, '.local/state/codex-plugins');
+  if (!override) return join(userHome, '.local/state/tool-logger');
   if (override === '~') return userHome;
   return override.startsWith('~/') ? join(userHome, override.slice(2)) : override;
 }

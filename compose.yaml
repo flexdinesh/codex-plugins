@@ -14,7 +14,7 @@ services:
     # The bind mount prevents writes regardless of the container user.
     volumes:
       - type: bind
-        source: ${CODEX_PLUGINS_STATE_DIR:-${HOME}/.local/state/codex-plugins}
+        source: ${TOOL_LOGGER_STATE_DIR:-${HOME}/.local/state/tool-logger}
         target: /logs
         read_only: true
         bind:

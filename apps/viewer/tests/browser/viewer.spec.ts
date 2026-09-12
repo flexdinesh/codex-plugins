@@ -247,7 +247,11 @@ test("payload HTML remains text and production assets run without CSP violations
   await page.getByRole("tab", { name: "Raw events" }).click();
   await expect(page.getByRole("tabpanel")).toHaveText(JSON.stringify({ pre: value.pre, post: value.post }, null, 2));
   await expect(page.locator('img[src="/injected-image"]')).toHaveCount(0);
-  await expect(page).toHaveTitle("Tool activity · Codex Plugins");
+  await expect(page).toHaveTitle("Tool activity · Tool Logger");
+  const brand = page.getByRole("link", { name: "Tool Logger home" });
+  await expect(brand).toBeVisible();
+  await expect(brand.locator(".brand-mark")).toHaveText("tl");
+  await expect(brand).toContainText("toollogger");
   expect(errors).toEqual([]);
 });
 

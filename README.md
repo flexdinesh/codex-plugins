@@ -1,4 +1,4 @@
-# Local Codex plugins
+# Tool Logger
 
 Install the Tool Call Logger plugin and view Codex tool activity in your browser.
 
@@ -21,7 +21,7 @@ Then:
 4. Start a new task and use any tool.
 
 The trusted hooks capture each tool call before and after it runs, then append the
-events to `~/.local/state/codex-plugins/tool-calls.jsonl`. The viewer reads this
+events to `~/.local/state/tool-logger/tool-calls.jsonl`. The viewer reads this
 file. Nothing is published.
 
 ## Run the viewer
@@ -29,7 +29,7 @@ file. Nothing is published.
 With Docker Compose:
 
 ```sh
-mkdir -p ~/.local/state/codex-plugins
+mkdir -p ~/.local/state/tool-logger
 docker compose up -d
 ```
 

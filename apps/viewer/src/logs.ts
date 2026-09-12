@@ -27,9 +27,9 @@ async function readHomeDirectory(source: string): Promise<string | undefined> {
 }
 
 export function logPath(): string {
-  const override = process.env.CODEX_PLUGINS_STATE_DIR;
+  const override = process.env.TOOL_LOGGER_STATE_DIR;
   const directory = !override
-    ? join(homedir(), ".local/state/codex-plugins")
+    ? join(homedir(), ".local/state/tool-logger")
     : override === "~"
       ? homedir()
       : override.startsWith("~/")

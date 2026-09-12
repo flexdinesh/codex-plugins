@@ -21,7 +21,7 @@ function fixture(t: TestContext) {
   const source = join(root, 'plugins/tool-call-logger');
   const version = readJson(join(source, '.codex-plugin/plugin.json')).version;
   assert.equal(typeof version, 'string');
-  const cache = join(codexHome, 'plugins/cache/local-codex-plugins/tool-call-logger', String(version));
+  const cache = join(codexHome, 'plugins/cache/tool-logger/tool-call-logger', String(version));
   return { temp, root, codexHome, cache, source };
 }
 
@@ -79,7 +79,7 @@ test('link preserves installed copy, points to live source, and is idempotent', 
   linkPlugin(f.root, 'tool-call-logger', options);
   assert.deepEqual(calls, [
     ['plugin', 'marketplace', 'add', f.root],
-    ['plugin', 'add', 'tool-call-logger@local-codex-plugins'],
+    ['plugin', 'add', 'tool-call-logger@tool-logger'],
   ]);
   assert.ok(lstatSync(f.cache).isDirectory(), 'Codex discovery requires a real version directory');
   assert.equal(lstatSync(f.cache).isSymbolicLink(), false);

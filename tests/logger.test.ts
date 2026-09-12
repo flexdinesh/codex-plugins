@@ -32,7 +32,7 @@ function fixture(t: TestContext) {
   function run(input: string, command = process.execPath, args = [script], extraEnv = {}) {
     return new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
       const child = spawn(command, args, {
-        cwd: temp, env: { ...process.env, CODEX_PLUGINS_STATE_DIR: directory, ...extraEnv },
+        cwd: temp, env: { ...process.env, TOOL_LOGGER_STATE_DIR: directory, ...extraEnv },
         stdio: 'pipe', timeout: 10_000,
       });
       let stdout = '';
@@ -202,7 +202,7 @@ test('Git enrichment has bounded requests and preserves root when status fails',
 test('default path uses home/.local/state; supports explicit state override', (t) => {
   const f = fixture(t);
   const directory = stateDirectory('', f.temp);
-  assert.equal(directory, join(f.temp, '.local/state/codex-plugins'));
+  assert.equal(directory, join(f.temp, '.local/state/tool-logger'));
   appendEvent(event(), directory);
   assert.ok(existsSync(join(directory, 'tool-calls.jsonl')));
   assert.equal(stateDirectory('~/custom', f.temp), join(f.temp, 'custom'));

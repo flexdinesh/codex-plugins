@@ -14,7 +14,7 @@ export function demoSnapshot(): Snapshot {
     "read_file",
   ];
   for (let index = 0; index < 84; index += 1) {
-    const root = index % 3 === 0 ? "/workspace/design-system" : "/workspace/codex-plugins";
+    const root = index % 3 === 0 ? "/workspace/design-system" : "/workspace/tool-logger";
     const cwd = index % 4 === 0 ? `${root}/apps/viewer` : root;
     const metadata = {
       session_cwd: cwd,

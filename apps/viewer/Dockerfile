@@ -15,7 +15,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=4317 \
-    CODEX_PLUGINS_STATE_DIR=/logs
+    TOOL_LOGGER_STATE_DIR=/logs
 
 # Backend remains native TypeScript; React and CSS are bundled frontend assets.
 COPY --from=build /workspace/apps/viewer/package.json ./

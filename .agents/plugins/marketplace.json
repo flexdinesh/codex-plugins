@@ -1,7 +1,7 @@
 {
-  "name": "local-codex-plugins",
+  "name": "tool-logger",
   "interface": {
-    "displayName": "Local Codex Plugins"
+    "displayName": "Tool Logger"
   },
   "plugins": [
     {

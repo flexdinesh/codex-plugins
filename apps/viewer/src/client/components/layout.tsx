@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 export function Layout({ children }: { children: ReactNode }) {
   return <>
     <aside className="sidebar">
-      <a className="brand" href="/" aria-label="Codex Plugins home"><span className="brand-mark">c<span>p</span></span><span>codex<span className="brand-sub">plugins</span></span></a>
+      <a className="brand" href="/" aria-label="Tool Logger home"><span className="brand-mark">t<span>l</span></span><span>tool<span className="brand-sub">logger</span></span></a>
       <div className="workspace-label"><span className="workspace-icon">⌘</span><div>Local workspace<small>Personal environment</small></div></div>
       <div className="nav-label">OBSERVE</div>
       <a className="nav-active" href="/"><span>▤</span> Tool activity <span className="nav-arrow">↗</span></a>
