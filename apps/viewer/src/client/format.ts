@@ -11,7 +11,7 @@ export const number = (value: number) => value.toLocaleString();
 
 export function summary(call: ToolCall): string {
   if (isObject(call.input)) {
-    for (const key of ["command", "cmd", "query", "path", "file_path", "url"]) {
+    for (const key of ["command", "cmd", "query", "path", "file_path", "filePath", "url"]) {
       const value = call.input[key];
       if (typeof value === "string") return value.replace(/\s+/g, " ");
     }

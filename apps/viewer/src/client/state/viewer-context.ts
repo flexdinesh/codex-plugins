@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import type { RefObject } from "react";
-import type { ToolCall } from "../../model.ts";
+import type { HarnessDataset, HarnessId, ToolCall } from "../../model.ts";
 import type { FilterOptions, FilterValues } from "./filters.ts";
 import type { PayloadTab, ViewerState } from "./viewer-reducer.ts";
 
@@ -8,6 +8,7 @@ export type ViewerView = ViewerState & {
   calls: ToolCall[];
   options: FilterOptions;
   selectedCall: ToolCall | undefined;
+  dataset: HarnessDataset | undefined;
 };
 
 export type ViewerActions = {
@@ -18,6 +19,7 @@ export type ViewerActions = {
   openCall: (id: string, trigger: HTMLElement) => void;
   closeInspector: () => void;
   selectPayloadTab: (tab: PayloadTab) => void;
+  selectHarness: (harness: HarnessId) => void;
 };
 
 export type ViewerFocus = {

@@ -1,6 +1,15 @@
 # OpenCode Tool Logger
 
-Placeholder for an OpenCode plugin that will append tool events to
-`~/.local/state/tool-logger/opencode-tool-calls.jsonl`.
+Local OpenCode V1/V2 plugin. Each native before/after tool event is appended to
+`~/.local/state/tool-logger/opencode-tool-calls.jsonl`, or the directory selected
+by `TOOL_LOGGER_STATE_DIR`.
 
-Implementation, OpenCode configuration, hooks, and viewer aggregation are out of scope.
+From the repository root, run:
+
+```sh
+pnpm run link:opencode opencode-tool-logger
+```
+
+The linker selects `v1.ts` for OpenCode V1 or `v2.ts` for V2. Activating V2
+permanently marks the state directory as V2, removes its existing OpenCode log
+once, and suppresses all later V1 writes. Codex logs are independent.

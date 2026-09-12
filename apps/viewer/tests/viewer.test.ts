@@ -13,11 +13,11 @@ import {
 } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
-import { testDataSnapshot, testLogPath } from "../src/demo.ts";
-import { groupCalls, logPath, readLogs } from "../src/logs.ts";
+import { testDataSnapshot, testLogPath, testOpenCodeV1LogPath, testOpenCodeV2LogPath } from "../src/demo.ts";
+import { groupCodexCalls, logPath, readLogs, readSnapshot } from "../src/logs.ts";
 import { callContext, displayPath, isObject, isSnapshot, matchesContext, recordContext, repositoryLabel } from "../src/model.ts";
 import type { LogRecord } from "../src/model.ts";
 import { browserUrl, createViewer, interfaceUrls, openBrowser, shouldOpenBrowser } from "../src/server.ts";
@@ -47,7 +47,7 @@ test("committed Codex test data is valid and covers viewer semantics", async () 
   assert.equal(snapshot.skipped, 0);
   assert.equal(snapshot.totalEvents, records.length);
   assert.equal(snapshot.calls.length, 8);
-  assert.equal(snapshot.homeDirectory, "/home/fixture-user");
+  assert.equal((await readSnapshot(dirname(testLogPath))).homeDirectory, "/home/fixture-user");
   assert.ok(snapshot.calls.some((call) => call.status === "completed"));
   assert.ok(snapshot.calls.some((call) => call.status === "awaiting"));
   assert.ok(snapshot.calls.some((call) => call.pre === null && call.post !== null));
@@ -65,20 +65,61 @@ test("committed Codex test data is valid and covers viewer semantics", async () 
   assert.match(data, /<script>/);
 });
 
+test("committed OpenCode V1 data preserves arguments, title, output, and metadata", async () => {
+  const snapshot = await readLogs(testOpenCodeV1LogPath, "opencode");
+  assert.equal(snapshot.apiVersion, 1);
+  assert.equal(snapshot.calls.length, 2);
+  const complete = snapshot.calls.find((call) => call.callId === "oc-v1-call-1");
+  assert.ok(complete);
+  assert.equal(complete.status, "completed");
+  assert.equal(complete.title, "Run checks");
+  assert.deepEqual(complete.input, { command: "pnpm check" });
+  assert.equal(complete.output, "All checks passed");
+  assert.deepEqual(complete.resultMetadata, { exit: 0, summary: "clean" });
+  assert.equal(snapshot.calls.find((call) => call.callId === "oc-v1-call-2")?.status, "awaiting");
+});
+
+test("committed OpenCode V2 data preserves identifiers and explicit execution status", async () => {
+  const snapshot = await readLogs(testOpenCodeV2LogPath, "opencode");
+  assert.equal(snapshot.apiVersion, 2);
+  assert.equal(snapshot.calls.length, 3);
+  const complete = snapshot.calls.find((call) => call.callId === "oc-v2-call-1");
+  assert.ok(complete);
+  assert.equal(complete.agent, "build");
+  assert.equal(complete.message, "msg-1");
+  assert.equal(complete.status, "completed");
+  assert.deepEqual(complete.output, { content: "Checks passed", metadata: { exit: 0, files: 12 } });
+  const failed = snapshot.calls.find((call) => call.callId === "oc-v2-call-2");
+  assert.equal(failed?.status, "failed");
+  assert.deepEqual(failed?.output, { name: "FileNotFound", message: "No such file" });
+  assert.equal(snapshot.calls.find((call) => call.callId === "oc-v2-call-3")?.status, "awaiting");
+});
+
+test("OpenCode V2 defensively supersedes mixed V1 records", async (t) => {
+  const f = fixture(t);
+  const mixed = readFileSync(testOpenCodeV1LogPath, "utf8") + readFileSync(testOpenCodeV2LogPath, "utf8");
+  writeFileSync(f.path, mixed);
+  const snapshot = await readLogs(f.path, "opencode");
+  assert.equal(snapshot.apiVersion, 2);
+  assert.ok(snapshot.calls.every((call) => call.apiVersion === 2));
+  assert.equal(snapshot.totalEvents, 5);
+});
+
 test("test-data timestamps rebase together without changing the fixture", async () => {
   const original = readFileSync(testLogPath, "utf8");
   const now = Date.parse("2030-01-02T03:04:05.000Z");
   const snapshot = await testDataSnapshot(now);
-  const times = snapshot.calls.flatMap((call) => [call.pre?.logged_at, call.post?.logged_at])
+  const times = snapshot.harnesses.flatMap((dataset) => dataset.calls.flatMap((call) => [call.pre?.logged_at, call.post?.logged_at]))
     .filter((value): value is string => value !== undefined).map((value) => Date.parse(value));
   assert.equal(Math.max(...times), now);
-  for (const call of snapshot.calls) {
+  for (const call of snapshot.harnesses.flatMap((dataset) => dataset.calls)) {
     if (call.pre && call.post) {
       assert.equal(Date.parse(call.post.logged_at) - Date.parse(call.pre.logged_at), call.durationMs);
     }
   }
   assert.equal(snapshot.demo, true);
-  assert.equal(snapshot.source, "test-data/codex/codex-tool-calls.jsonl");
+  assert.deepEqual(snapshot.harnesses.map((dataset) => dataset.harness), ["codex", "opencode"]);
+  assert.equal(snapshot.harnesses[0]?.source, "test-data/codex/codex-tool-calls.jsonl");
   assert.equal(readFileSync(testLogPath, "utf8"), original);
 });
 
@@ -99,6 +140,19 @@ test("prefers Codex logs and falls back to legacy logs without modifying either"
   writeFileSync(f.path, "current\n");
   assert.equal(logPath(), f.path);
   assert.equal(readFileSync(legacy, "utf8"), "legacy\n");
+});
+
+test("snapshot includes only readable harness sources in alphabetical order", async (t) => {
+  const f = fixture(t);
+  writeFileSync(f.path, record());
+  const opencode = join(f.directory, "opencode-tool-calls.jsonl");
+  copyFileSync(testOpenCodeV2LogPath, opencode);
+  const both = await readSnapshot(f.directory);
+  assert.deepEqual(both.harnesses.map((dataset) => dataset.label), ["Codex", "OpenCode"]);
+  rmSync(opencode);
+  symlinkSync(join(f.directory, "missing-target"), opencode);
+  const codexOnly = await readSnapshot(f.directory);
+  assert.deepEqual(codexOnly.harnesses.map((dataset) => dataset.harness), ["codex"]);
 });
 
 test("lists every IPv4 interface as a reachable viewer URL", () => {
@@ -133,13 +187,13 @@ test("viewer reads mounted host state and tolerates missing or malformed state w
   const state = join(f.directory, 'state.json');
   const data = record();
   writeFileSync(f.path, data);
-  assert.equal((await readLogs(f.path)).homeDirectory, undefined);
+  assert.equal((await readSnapshot(f.directory)).homeDirectory, undefined);
   writeFileSync(state, JSON.stringify({ schema_version: 1, home_directory: '/Users/alex' }));
-  assert.equal((await readLogs(f.path)).homeDirectory, '/Users/alex');
+  assert.equal((await readSnapshot(f.directory)).homeDirectory, '/Users/alex');
   writeFileSync(state, 'broken');
-  const snapshot = await readLogs(f.path);
+  const snapshot = await readSnapshot(f.directory);
   assert.equal(snapshot.homeDirectory, undefined);
-  assert.equal(snapshot.calls.length, 1);
+  assert.equal(snapshot.harnesses[0]?.calls.length, 1);
   assert.equal(readFileSync(f.path, 'utf8'), data);
 });
 function record(
@@ -174,7 +228,7 @@ test("Git details preserve before/after snapshots and use the latest captured st
   const post: LogRecord = { ...pre, event: { ...pre.event, hook_event_name: "PostToolUse" },
     metadata: { git: { root: "/work/repo", branch: "feature/viewer", commit: "def", dirty: true,
       upstream: "origin/main", ahead_behind: "+2 -1", status_porcelain_v2: "? new file.ts\0" } } };
-  const call = groupCalls([pre, post])[0];
+  const call = groupCodexCalls([pre, post])[0];
   assert.ok(call);
   assert.equal(recordContext(call.pre).dirty, false);
   assert.equal(callContext(call).dirty, true);
@@ -192,7 +246,7 @@ test("Git details preserve before/after snapshots and use the latest captured st
 });
 
 test("repository and directory filters combine exact full paths, including missing metadata", () => {
-  const calls = groupCalls([
+  const calls = groupCodexCalls([
     { logged_at: "2026-09-08T01:00:00Z", event: { hook_event_name: "PreToolUse", cwd: "/work/repo/app" },
       metadata: { git: { root: "/work/repo" } } },
     { logged_at: "2026-09-08T01:00:01Z", event: { hook_event_name: "PreToolUse", cwd: "/elsewhere/repo" },
@@ -316,7 +370,7 @@ test("bounds reading to a tail window and never parses cut-off lines", async (t)
     f.path,
     record("PreToolUse", "s1", undefined, "x".repeat(3000)) + tail,
   );
-  const result = await readLogs(f.path, Buffer.byteLength(tail) + 20);
+  const result = await readLogs(f.path, "codex", Buffer.byteLength(tail) + 20);
   assert.equal(result.truncated, true);
   assert.equal(result.skipped, 0);
   assert.equal(result.calls.length, 1);
@@ -362,11 +416,11 @@ test("HTTP serves the app, browser JavaScript, live data, and read-only routes",
   const empty: unknown = await (await fetch(`${base}/api/logs`)).json();
   assert.ok(isSnapshot(empty));
   assert.equal(empty.homeDirectory, undefined);
-  assert.equal(empty.missing, true);
+  assert.deepEqual(empty.harnesses, []);
   writeFileSync(f.path, record());
   const updated: unknown = await (await fetch(`${base}/api/logs`)).json();
   assert.ok(isSnapshot(updated));
-  assert.equal(updated.calls.length, 1);
+  assert.equal(updated.harnesses[0]?.calls.length, 1);
   assert.equal(
     (await fetch(`${base}/api/logs`, { method: "POST" })).status,
     405,
@@ -471,7 +525,8 @@ test("development transforms React with fresh CSP nonces and blocks backend file
   assert.equal((await fetch(`${base}/@react-refresh`)).status, 200);
   const snapshot: unknown = await (await fetch(`${base}/api/logs`)).json();
   assert.ok(isSnapshot(snapshot));
-  assert.equal(snapshot.calls.length, 8);
+  assert.equal(snapshot.harnesses.find((dataset) => dataset.harness === "codex")?.calls.length, 8);
+  assert.equal(snapshot.harnesses.find((dataset) => dataset.harness === "opencode")?.calls.length, 3);
   assert.equal(snapshot.demo, true);
   for (const path of ["/src/server.ts", "/src/logs.ts?raw", "/src/demo.ts", "/package.json", "/vite.config.ts", "/tests/viewer.test.ts", "/.env", "/@fs/etc/passwd", "/src/client/%2e%2e%2fserver.ts", "/node_modules/.vite/deps/_metadata.json"]) {
     assert.equal((await fetch(`${base}${path}`)).status, 404, path);

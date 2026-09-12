@@ -1,31 +1,54 @@
 export type JsonObject = Record<string, unknown>;
+export type HarnessId = "codex" | "opencode";
+export type CallStatus = "completed" | "failed" | "awaiting";
+
 export type LogRecord = {
+  schema_version?: unknown;
   logged_at: string;
   event: JsonObject;
   metadata?: unknown;
+  api_version?: unknown;
+  hook?: unknown;
+  harness?: unknown;
 };
+
 export type ToolCall = {
   id: string;
+  harness: HarnessId;
+  apiVersion: 1 | 2 | null;
   time: string;
   tool: string;
   session: string;
   turn: string;
+  callId: string;
+  message: string;
+  agent: string;
+  title: string;
   cwd: string;
-  status: "completed" | "awaiting";
+  status: CallStatus;
   durationMs: number | null;
   input: unknown;
   output: unknown;
+  resultMetadata: unknown;
   pre: LogRecord | null;
   post: LogRecord | null;
 };
-export type Snapshot = {
-  homeDirectory?: string;
+
+export type HarnessDataset = {
+  harness: HarnessId;
+  label: string;
+  apiVersion: 1 | 2 | null;
   calls: ToolCall[];
   source: string;
   missing: boolean;
   truncated: boolean;
   skipped: number;
   totalEvents: number;
+};
+
+export type Snapshot = {
+  homeDirectory?: string;
+  harnesses: HarnessDataset[];
   demo: boolean;
 };
 
@@ -58,11 +81,8 @@ export function recordContext(record: LogRecord | null) {
   const gitError = errors.find((error: unknown) => isObject(error) && error.source === "git");
   return {
     directory: text(record?.event.cwd) || text(metadata.session_cwd),
-    root: text(git.root),
-    branch: text(git.branch),
-    commit: text(git.commit),
-    upstream: text(git.upstream),
-    divergence: text(git.ahead_behind),
+    root: text(git.root), branch: text(git.branch), commit: text(git.commit),
+    upstream: text(git.upstream), divergence: text(git.ahead_behind),
     dirty: typeof git.dirty === "boolean" ? git.dirty : null,
     status: text(git.status_porcelain_v2),
     error: text(git.error) || (isObject(gitError) ? text(gitError.message) : ""),
@@ -70,8 +90,6 @@ export function recordContext(record: LogRecord | null) {
 }
 
 export function callContext(call: ToolCall) {
-  // Use the latest captured snapshot, including unavailable/failed Git reads.
-  // Legacy post-events without metadata can still use an enriched pre-event.
   const record = call.post && isObject(call.post.metadata) ? call.post : call.pre ?? call.post;
   const context = recordContext(record);
   return { ...context, directory: context.directory || call.cwd };
@@ -83,46 +101,35 @@ export function matchesContext(call: ToolCall, directory: string, repository: st
     && (repository === "all" || repository === (context.root || "unknown"));
 }
 
-export function isRecord(value: unknown): value is LogRecord {
-  return (
-    isObject(value) &&
-    typeof value.logged_at === "string" &&
-    Number.isFinite(Date.parse(value.logged_at)) &&
-    isObject(value.event) &&
-    (value.event.hook_event_name === "PreToolUse" ||
-      value.event.hook_event_name === "PostToolUse")
-  );
+export function isLogRecord(value: unknown): value is LogRecord {
+  return isObject(value) && typeof value.logged_at === "string"
+    && Number.isFinite(Date.parse(value.logged_at)) && isObject(value.event);
 }
 
 function isCall(value: unknown): value is ToolCall {
-  return (
-    isObject(value) &&
-    typeof value.id === "string" &&
-    typeof value.time === "string" &&
-    typeof value.tool === "string" &&
-    typeof value.session === "string" &&
-    typeof value.turn === "string" &&
-    typeof value.cwd === "string" &&
-    (value.status === "completed" || value.status === "awaiting") &&
-    (value.durationMs === null || typeof value.durationMs === "number") &&
-    (value.pre === null || isRecord(value.pre)) &&
-    (value.post === null || isRecord(value.post)) &&
-    "input" in value &&
-    "output" in value
-  );
+  return isObject(value) && (value.harness === "codex" || value.harness === "opencode")
+    && (value.apiVersion === null || value.apiVersion === 1 || value.apiVersion === 2)
+    && typeof value.id === "string" && typeof value.time === "string"
+    && typeof value.tool === "string" && typeof value.session === "string"
+    && typeof value.turn === "string" && typeof value.callId === "string"
+    && typeof value.message === "string" && typeof value.agent === "string"
+    && typeof value.title === "string" && typeof value.cwd === "string"
+    && (value.status === "completed" || value.status === "failed" || value.status === "awaiting")
+    && (value.durationMs === null || typeof value.durationMs === "number")
+    && (value.pre === null || isLogRecord(value.pre)) && (value.post === null || isLogRecord(value.post))
+    && "input" in value && "output" in value && "resultMetadata" in value;
+}
+
+function isHarnessDataset(value: unknown): value is HarnessDataset {
+  return isObject(value) && (value.harness === "codex" || value.harness === "opencode")
+    && typeof value.label === "string" && (value.apiVersion === null || value.apiVersion === 1 || value.apiVersion === 2)
+    && Array.isArray(value.calls) && value.calls.every(isCall) && typeof value.source === "string"
+    && typeof value.missing === "boolean" && typeof value.truncated === "boolean"
+    && typeof value.skipped === "number" && typeof value.totalEvents === "number";
 }
 
 export function isSnapshot(value: unknown): value is Snapshot {
-  return (
-    isObject(value) &&
-    Array.isArray(value.calls) &&
-    (value.homeDirectory === undefined || typeof value.homeDirectory === "string") &&
-    value.calls.every(isCall) &&
-    typeof value.source === "string" &&
-    typeof value.missing === "boolean" &&
-    typeof value.truncated === "boolean" &&
-    typeof value.skipped === "number" &&
-    typeof value.totalEvents === "number" &&
-    typeof value.demo === "boolean"
-  );
+  return isObject(value) && Array.isArray(value.harnesses) && value.harnesses.every(isHarnessDataset)
+    && (value.homeDirectory === undefined || typeof value.homeDirectory === "string")
+    && typeof value.demo === "boolean";
 }

@@ -1,6 +1,6 @@
 import { ChevronDown, ExternalLink, FilePenLine, Radar, Search, Terminal } from "lucide-react";
 import { callContext, displayPath, repositoryName } from "../../model.ts";
-import type { Snapshot, ToolCall } from "../../model.ts";
+import type { HarnessDataset, Snapshot, ToolCall } from "../../model.ts";
 import { clock, duration, number, summary } from "../format.ts";
 import { CallStatus } from "./call-status.tsx";
 import { Button } from "./ui/button.tsx";
@@ -45,17 +45,19 @@ function CallRow({ call, homeDirectory, selected, onOpen }: CallRowProps) {
         <div className="repository-name max-w-60 truncate text-sm text-secondary">{repository}</div>
         <div className="directory-path mt-1 max-w-60 truncate font-mono text-xs text-muted">{pathLabel(context.directory) || "No directory recorded"}</div>
       </TableCell>
-      <TableCell><CallStatus status={call.status} /></TableCell>
+      <TableCell><CallStatus call={call} /></TableCell>
       <TableCell>{duration(call.durationMs)}</TableCell>
-      <TableCell title={call.session}><span className="session-tag rounded-sm border border-border px-2 py-1 font-mono text-xs text-muted">{call.session ? call.session.slice(0, 14) : "—"}</span></TableCell>
+      {call.harness === "opencode" && call.apiVersion === 2 && <TableCell><div className="text-sm text-secondary">{call.agent || "Not recorded"}</div><div className="mt-1 font-mono text-xs text-muted" title={call.message}>{call.message ? call.message.slice(0, 14) : "No message ID"}</div></TableCell>}
+      <TableCell title={call.harness === "opencode" ? call.callId : call.session}><span className="session-tag rounded-sm border border-border px-2 py-1 font-mono text-xs text-muted">{(call.harness === "opencode" ? call.callId : call.session).slice(0, 14) || "—"}</span></TableCell>
       <TableCell className="cell-time tabular-nums">{clock(call.time)}</TableCell><TableCell className="arrow-cell pr-6 pl-0 text-border-strong"><ExternalLink aria-hidden="true" className="size-4" /></TableCell>
     </TableRow>
   );
 }
 
-export function CallTable({ calls, homeDirectory, selected, onOpen }: {
+export function CallTable({ calls, homeDirectory, dataset, selected, onOpen }: {
   calls: ToolCall[];
   homeDirectory: string | undefined;
+  dataset: HarnessDataset | undefined;
   selected: string | null;
   onOpen: CallRowProps["onOpen"];
 }) {
@@ -65,7 +67,7 @@ export function CallTable({ calls, homeDirectory, selected, onOpen }: {
         <TableHeader>
           <TableRow>
             <TableHead className="pl-6">TOOL / INPUT</TableHead><TableHead>REPOSITORY / DIRECTORY</TableHead><TableHead>STATUS</TableHead>
-            <TableHead>DURATION</TableHead><TableHead>SESSION</TableHead><TableHead>TIME</TableHead><TableHead><span className="sr-only">Inspect</span></TableHead>
+            <TableHead>DURATION</TableHead>{dataset?.harness === "opencode" && dataset.apiVersion === 2 && <TableHead>AGENT / MESSAGE</TableHead>}<TableHead>{dataset?.harness === "opencode" ? "CALL ID" : "SESSION"}</TableHead><TableHead>TIME</TableHead><TableHead><span className="sr-only">Inspect</span></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody id="rows">
@@ -76,13 +78,13 @@ export function CallTable({ calls, homeDirectory, selected, onOpen }: {
   );
 }
 
-export function CallEmptyState({ snapshot, count }: { snapshot: Snapshot | undefined; count: number }) {
-  const hasCalls = Boolean(snapshot?.calls.length);
+export function CallEmptyState({ snapshot, dataset, count }: { snapshot: Snapshot | undefined; dataset: HarnessDataset | undefined; count: number }) {
+  const hasCalls = Boolean(dataset?.calls.length);
   const message = hasCalls
     ? "Try a different search or reset the filters to see all calls."
-    : snapshot?.missing
-      ? "Enable and trust the Tool Call Logger plugin in Codex. The log file will be created on the first call."
-      : "New tool calls will appear automatically. Only complete, valid tool events are shown.";
+    : !dataset
+      ? "Install a supported logger and make a tool call. Available harnesses appear in the navigation."
+      : `New ${dataset.label} tool calls will appear automatically. Only complete, valid events are shown.`;
   return (
     <div id="empty" className="empty px-6 py-12 text-center" hidden={!snapshot || count > 0}>
       <div className="empty-icon mx-auto mb-4 flex size-12 items-center justify-center rounded-lg border border-border bg-accent-soft text-accent"><Radar aria-hidden="true" className="size-5" /></div>
@@ -92,19 +94,19 @@ export function CallEmptyState({ snapshot, count }: { snapshot: Snapshot | undef
   );
 }
 
-export function CallTableFooter({ snapshot, hasMore, onMore }: {
-  snapshot: Snapshot | undefined;
+export function CallTableFooter({ dataset, hasMore, onMore }: {
+  dataset: HarnessDataset | undefined;
   hasMore: boolean;
   onMore: () => void;
 }) {
-  const note = snapshot?.truncated
+  const note = dataset?.truncated
     ? "Showing recent events only · older log data is outside this window"
-    : `${snapshot?.skipped ? `${snapshot.skipped} malformed records skipped · ` : ""}Latest 2,000 log events · refreshes every 2 seconds`;
+    : `${dataset?.skipped ? `${dataset.skipped} malformed records skipped · ` : ""}Latest 2,000 log events · refreshes every 2 seconds`;
   return (
     <footer className="table-footer flex items-center justify-between gap-3 px-4 py-4 text-xs text-muted sm:px-6">
       <span id="window-note">{note}</span>
       <Button id="more" variant="ghost" size="compact" hidden={!hasMore} onClick={onMore}>Show more <ChevronDown aria-hidden="true" /></Button>
-      <span id="event-count">{number(snapshot?.totalEvents ?? 0)} events</span>
+      <span id="event-count">{number(dataset?.totalEvents ?? 0)} events</span>
     </footer>
   );
 }

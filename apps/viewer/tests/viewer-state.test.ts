@@ -6,10 +6,12 @@ import { initialViewerState, viewerReducer } from "../src/client/state/viewer-re
 function snapshot(id: string, tool = "Bash"): Snapshot {
   const call: ToolCall = {
     id, tool, time: "2026-09-09T10:00:00Z", session: "session", turn: "turn", cwd: "/work",
+    harness: "codex", apiVersion: null, callId: id, message: "", agent: "", title: "", resultMetadata: null,
     status: "awaiting", durationMs: null, input: { command: "pwd" }, output: null,
     pre: null, post: null,
   };
-  return { calls: [call], source: "/logs", missing: false, truncated: false, skipped: 0, totalEvents: 1, demo: false };
+  return { harnesses: [{ harness: "codex", label: "Codex", apiVersion: null, calls: [call], source: "/logs",
+    missing: false, truncated: false, skipped: 0, totalEvents: 1 }], demo: false };
 }
 
 test("refresh keeps inspector selection and payload tab while updating its call", () => {
@@ -17,13 +19,13 @@ test("refresh keeps inspector selection and payload tab while updating its call"
   state = viewerReducer(state, { type: "callSelected", id: "one" });
   state = viewerReducer(state, { type: "payloadTabChanged", tab: "output" });
   const next = snapshot("one");
-  const call = next.calls[0];
+  const call = next.harnesses[0]?.calls[0];
   assert.ok(call);
   call.output = { message: "new result" };
   state = viewerReducer(state, { type: "snapshotReceived", snapshot: next, updated: "second" });
   assert.equal(state.selectedCallId, "one");
   assert.equal(state.payloadTab, "output");
-  assert.deepEqual(state.snapshot?.calls[0]?.output, { message: "new result" });
+  assert.deepEqual(state.snapshot?.harnesses[0]?.calls[0]?.output, { message: "new result" });
 });
 
 test("rolling log window clears unavailable filters and closes an evicted selection atomically", () => {
@@ -78,4 +80,23 @@ test("connection failure and recovery preserve user state and last successful da
   assert.equal(state.filters.tool, "Bash");
   assert.equal(state.payloadTab, "raw");
   assert.equal(state.limit, 200);
+});
+
+test("harness selection resets harness-specific state", () => {
+  const codex = snapshot("codex-call");
+  const opencodeCall = codex.harnesses[0]?.calls[0];
+  assert.ok(opencodeCall);
+  const next: ToolCall = { ...opencodeCall, id: "opencode-call", harness: "opencode", apiVersion: 2,
+    agent: "build", callId: "opencode-call" };
+  const combined: Snapshot = { ...codex, harnesses: [...codex.harnesses, {
+    harness: "opencode", label: "OpenCode", apiVersion: 2, calls: [next], source: "/opencode",
+    missing: false, truncated: false, skipped: 0, totalEvents: 1,
+  }] };
+  let state = viewerReducer(initialViewerState, { type: "snapshotReceived", snapshot: combined, updated: "first" });
+  state = viewerReducer(state, { type: "callSelected", id: "codex-call" });
+  state = viewerReducer(state, { type: "filterChanged", key: "tool", value: "Bash" });
+  state = viewerReducer(state, { type: "harnessSelected", harness: "opencode" });
+  assert.equal(state.selectedHarness, "opencode");
+  assert.equal(state.selectedCallId, null);
+  assert.deepEqual(state.filters, initialViewerState.filters);
 });

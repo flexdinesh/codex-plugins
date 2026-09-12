@@ -23,6 +23,13 @@ export function Inspector({ call, homeDirectory, tab, onTabChange, returnFocusRe
 }) {
   const { dialogRef, closeRef } = useDialogFocus({ onClose, returnFocusRef, searchRef });
   const context = callContext(call);
+  const identifiers: [string, string][] = call.harness === "codex"
+    ? [["Turn", call.turn || "Not recorded"]]
+    : [["API", `OpenCode V${call.apiVersion ?? "?"}`], ["Call ID", call.callId || "Not recorded"]];
+  if (call.harness === "opencode" && call.apiVersion === 2) {
+    identifiers.push(["Message", call.message || "Not recorded"], ["Agent", call.agent || "Not recorded"]);
+  }
+  if (call.harness === "opencode" && call.title) identifiers.push(["Title", call.title]);
   return (
     <>
       <SheetOverlay id="overlay" onClick={onClose} />
@@ -32,13 +39,13 @@ export function Inspector({ call, homeDirectory, tab, onTabChange, returnFocusRe
           <Button ref={closeRef} id="close" variant="ghost" size="icon" className="size-10" aria-label="Close call details" onClick={onClose}><X aria-hidden="true" /></Button>
         </SheetHeader>
         <h2 id="detail-tool" className="mb-3 text-xl font-semibold tracking-tight wrap-break-word">{call.tool}</h2>
-        <div id="detail-status"><CallStatus status={call.status} /></div>
+        <div id="detail-status"><CallStatus call={call} /></div>
         <dl id="metadata" className="my-6 grid grid-cols-[88px_minmax(0,1fr)] gap-3 border-y border-border py-5 text-sm">
           <MetadataFields values={[
             ["Time", new Date(call.time).toLocaleString()],
             ["Duration", duration(call.durationMs)],
             ["Session", call.session || "Not recorded"],
-            ["Turn", call.turn || "Not recorded"],
+            ...identifiers,
             ["Directory", displayPath(context.directory, homeDirectory) || "Not recorded"],
             ["Repository", repositoryName(context.root) || "Not recorded"],
             ["Branch", context.branch || "Not recorded"],
@@ -46,7 +53,9 @@ export function Inspector({ call, homeDirectory, tab, onTabChange, returnFocusRe
         </dl>
         <GitSnapshots call={call} homeDirectory={homeDirectory} />
         <PayloadPanel call={call} tab={tab} onTabChange={onTabChange} />
-        <p className="detail-note text-xs leading-5 text-muted">“Result received” means a post-tool event was logged. Inspect the result to determine whether the tool succeeded.</p>
+        <p className="detail-note text-xs leading-5 text-muted">{call.harness === "opencode" && call.apiVersion === 2
+          ? "OpenCode V2 reports completed and failed execution states explicitly."
+          : "“Result received” means an after-tool event was logged. Inspect the result to determine whether the tool succeeded."}</p>
       </SheetContent>
     </>
   );

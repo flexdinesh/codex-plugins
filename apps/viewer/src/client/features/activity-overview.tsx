@@ -8,14 +8,16 @@ import { Button } from "../components/ui/button.tsx";
 import { useViewerActions, useViewerState } from "../state/viewer-context.ts";
 
 export function ActivityHeading() {
-  const { snapshot, live } = useViewerState();
+  const { snapshot, dataset, live } = useViewerState();
   const { toggleLive } = useViewerActions();
   return (
     <div className="page-heading mb-8 flex items-start justify-between gap-4">
       <div>
         <div className="eyebrow text-xs font-semibold tracking-widest text-secondary">OBSERVABILITY</div>
-        <h1 className="my-2 text-2xl font-semibold tracking-tight sm:text-3xl">Tool activity<span className="heading-dot text-accent">.</span></h1>
-        <p className="max-w-md text-sm leading-6 text-muted">Follow the work. See what happened, and what came back.</p>
+        <h1 className="my-2 text-2xl font-semibold tracking-tight sm:text-3xl">{dataset ? `${dataset.label} activity` : "Tool activity"}<span className="heading-dot text-accent">.</span></h1>
+        <p className="max-w-md text-sm leading-6 text-muted">{dataset?.harness === "opencode"
+          ? `OpenCode V${dataset.apiVersion ?? "?"} calls with native execution details.`
+          : dataset ? "Codex calls, hook results, and repository context." : "No harness logs are available yet."}</p>
       </div>
       <div className="heading-actions flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
         <Badge id="demo" variant="warning" className="tracking-wide" hidden={!snapshot?.demo}>TEST DATA</Badge>
@@ -30,9 +32,9 @@ export function ActivityHeading() {
 }
 
 export function ActivityOverview() {
-  const { calls } = useViewerState();
+  const { calls, dataset } = useViewerState();
   const { changeFilter } = useViewerActions();
-  return <><Stats calls={calls} /><Charts calls={calls} onTool={(tool) => changeFilter("tool", tool)} /></>;
+  return <><Stats calls={calls} dataset={dataset} /><Charts calls={calls} onTool={(tool) => changeFilter("tool", tool)} /></>;
 }
 
 export function ConnectionNotice() {
@@ -41,8 +43,8 @@ export function ConnectionNotice() {
 }
 
 export function LogSource() {
-  const { snapshot } = useViewerState();
-  const source = snapshot ? displayPath(snapshot.source, snapshot.homeDirectory) : "Reading local log…";
+  const { snapshot, dataset } = useViewerState();
+  const source = dataset ? displayPath(dataset.source, snapshot?.homeDirectory) : snapshot ? "No harness source available" : "Reading local logs…";
   return (
     <div className="source-line mt-5 flex items-center gap-2 font-mono text-xs text-muted">
       <TerminalSquare aria-hidden="true" className="size-4 shrink-0" /><span id="source" className="truncate" title={source}>{source}</span>

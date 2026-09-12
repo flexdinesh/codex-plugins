@@ -7,7 +7,7 @@ import { networkInterfaces } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDataSnapshot } from "./demo.ts";
-import { logPath, readLogs } from "./logs.ts";
+import { readLogs, readSnapshot } from "./logs.ts";
 import type { Snapshot } from "./model.ts";
 import type { ViteDevServer } from "vite";
 
@@ -148,7 +148,9 @@ export async function createViewer(
     }
     if (path === "/api/logs") {
       try {
-        pending ??= testData ? testDataSnapshot() : readLogs(source ?? logPath());
+        pending ??= testData ? testDataSnapshot() : source
+          ? readLogs(source).then((dataset) => ({ harnesses: dataset.missing ? [] : [dataset], demo: false }))
+          : readSnapshot();
         const snapshot = await pending;
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify(snapshot));

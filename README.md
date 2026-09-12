@@ -2,12 +2,12 @@
 
 Log tool activity from supported coding harnesses and inspect it in a local web UI.
 
-Requires macOS or Linux, Node.js 26, pnpm 11, and Codex with plugins and hooks enabled.
+Requires macOS or Linux, Node.js 26, pnpm 11, and a supported Codex or OpenCode installation.
 
 ## Packages
 
 - `plugins/codex-tool-logger`: working Codex hooks and collector.
-- `plugins/opencode-tool-logger`: placeholder only; implementation is out of scope.
+- `plugins/opencode-tool-logger`: OpenCode V1/V2 plugin and collector.
 - `apps/viewer`: read-only Vite and React web UI plus its Node.js server.
 
 ## Add the Codex plugin
@@ -30,12 +30,31 @@ Then:
 4. Start a new task and use any tool.
 
 The trusted hooks capture each tool call before and after it runs, then append the
-events to `~/.local/state/tool-logger/codex-tool-calls.jsonl`. Future harness plugins
-use separate files in the same directory. Set `TOOL_LOGGER_STATE_DIR` to override
-that shared directory. Nothing is published.
+events to `~/.local/state/tool-logger/codex-tool-calls.jsonl`. Harness plugins use
+separate files in the same directory. Set `TOOL_LOGGER_STATE_DIR` to override that
+shared directory. Nothing is published.
 
-The viewer prefers `codex-tool-calls.jsonl`. If it is absent, the viewer reads the
-legacy `tool-calls.jsonl` in place without renaming, copying, or deleting it.
+The viewer reads each available harness log independently. For Codex, it prefers
+`codex-tool-calls.jsonl`; if absent, it reads legacy `tool-calls.jsonl` in place
+without renaming, copying, or deleting it.
+
+## Add the OpenCode plugin
+
+From this repository:
+
+```sh
+pnpm install
+pnpm run link:opencode opencode-tool-logger
+```
+
+The linker detects the installed OpenCode generation and installs one global local
+plugin link. Restart OpenCode after linking. V2 wins when both generations exist:
+its first activation deletes the older `opencode-tool-calls.jsonl` data and
+permanently suppresses V1 writes in that state directory.
+
+OpenCode events append to
+`~/.local/state/tool-logger/opencode-tool-calls.jsonl`. The shared
+`TOOL_LOGGER_STATE_DIR` override applies to both harnesses.
 
 ## Run the viewer
 
@@ -53,11 +72,11 @@ pnpm --filter viewer build
 pnpm --filter viewer start
 ```
 
-`start` reads real logs from the configured state directory. For UI development,
-run `pnpm --filter viewer dev`; it reads the committed synthetic fixture at
-`test-data/codex/codex-tool-calls.jsonl` and rebases its timestamps to the current
-time. Run `pnpm --filter viewer test-data` to serve the same fixture from a
-production build.
+`start` reads available harness logs from the configured state directory. Select
+the harness from the left navigation. For UI development, run
+`pnpm --filter viewer dev`; it reads the committed Codex and OpenCode synthetic
+fixtures and rebases their timestamps to the current time. Run
+`pnpm --filter viewer test-data` to serve those fixtures from a production build.
 
 The direct server prints every IPv4 URL:
 

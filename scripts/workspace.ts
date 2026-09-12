@@ -154,6 +154,15 @@ type CodexLinkOptions = {
   runCodex?: (args: string[]) => void;
 };
 
+export type OpenCodeGeneration = 1 | 2;
+
+type OpenCodeLinkOptions = {
+  commandVersion?: (command: string) => string | undefined;
+  configDirectory?: string;
+  environment?: Readonly<Record<string, string | undefined>>;
+  homeDirectory?: string;
+};
+
 export function linkCodexPlugin(root: string, name: string, options: CodexLinkOptions = {}): void {
   validateName(name);
   const catalog = check(root);
@@ -221,16 +230,94 @@ export function linkCodexPlugin(root: string, name: string, options: CodexLinkOp
   console.log("Restart Codex. Review and trust this plugin's hooks in /hooks before use.");
 }
 
+function executableVersion(command: string): string | undefined {
+  try {
+    return execFileSync(command, ['--version'], {
+      encoding: 'utf8', timeout: 1_000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return;
+  }
+}
+
+export function detectOpenCodeGeneration(
+  commandVersion: (command: string) => string | undefined = executableVersion,
+): OpenCodeGeneration {
+  if (commandVersion('opencode2') !== undefined) return 2;
+  const version = commandVersion('opencode');
+  if (version !== undefined) {
+    const match = version.match(/(?:^|\s)v?(\d+)\./);
+    const major = match?.[1];
+    if (major === undefined) throw new Error(`unable to identify OpenCode generation: ${version}`);
+    return Number(major) >= 2 ? 2 : 1;
+  }
+  throw new Error('OpenCode CLI not found; install opencode2 or opencode');
+}
+
+export function openCodeConfigDirectory(options: OpenCodeLinkOptions = {}): string {
+  const environment = options.environment ?? process.env;
+  const home = options.homeDirectory ?? homedir();
+  const configured = options.configDirectory || environment.OPENCODE_CONFIG_DIR;
+  const expand = (path: string): string => path === '~' ? home
+    : path.startsWith('~/') ? join(home, path.slice(2)) : path;
+  if (configured) return resolve(expand(configured));
+  const xdg = environment.XDG_CONFIG_HOME;
+  if (xdg) return resolve(expand(xdg), 'opencode');
+  return join(home, '.config/opencode');
+}
+
+function openCodeLinkTarget(destination: string, source: string): boolean {
+  const target = readlinkSync(destination);
+  return target === join(source, 'v1.ts') || target === join(source, 'v2.ts')
+    || resolve(dirname(destination), target) === join(source, 'v1.ts')
+    || resolve(dirname(destination), target) === join(source, 'v2.ts');
+}
+
+export function linkOpenCodePlugin(root: string, name: string, options: OpenCodeLinkOptions = {}): void {
+  validateName(name);
+  const source = realpathSync(join(root, 'plugins', name));
+  const packageJson = readJson(join(source, 'package.json'));
+  if (packageJson.name !== name || packageJson.private !== true) {
+    throw new Error(`${name}: package name/private mismatch`);
+  }
+  const generation = detectOpenCodeGeneration(options.commandVersion);
+  const entrypoint = join(source, `v${generation}.ts`);
+  const entry = lstatSync(entrypoint, { throwIfNoEntry: false });
+  if (!entry?.isFile()) throw new Error(`missing OpenCode V${generation} entrypoint: ${entrypoint}`);
+  const pluginDirectory = join(openCodeConfigDirectory(options), 'plugins');
+  mkdirSync(pluginDirectory, { recursive: true });
+  const destination = join(pluginDirectory, `${name}.ts`);
+  const existing = lstatSync(destination, { throwIfNoEntry: false });
+  if (existing && (!existing.isSymbolicLink() || !openCodeLinkTarget(destination, source))) {
+    throw new Error(`refusing to replace unrelated path: ${destination}`);
+  }
+  if (existing && resolve(dirname(destination), readlinkSync(destination)) === entrypoint) {
+    console.log(`Already linked OpenCode V${generation}: ${destination} -> ${entrypoint}`);
+    return;
+  }
+  const temporary = join(pluginDirectory, `.${name}-${randomUUID()}.tmp`);
+  try {
+    symlinkSync(entrypoint, temporary, 'file');
+    renameSync(temporary, destination);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+  console.log(`Linked OpenCode V${generation}: ${destination} -> ${entrypoint}`);
+}
+
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [command, name, ...extra] = process.argv.slice(2);
     if (command === 'check' && name === undefined) {
       console.log(`Validated ${check(ROOT).plugins.length} local Codex plugin(s).`);
-    } else if ((command === 'new-codex' || command === 'link-codex') && name !== undefined && extra.length === 0) {
+    } else if ((command === 'new-codex' || command === 'link-codex' || command === 'link-opencode')
+        && name !== undefined && extra.length === 0) {
       if (command === 'new-codex') newCodexPlugin(ROOT, name);
-      else linkCodexPlugin(ROOT, name);
+      else if (command === 'link-codex') linkCodexPlugin(ROOT, name);
+      else linkOpenCodePlugin(ROOT, name);
     } else {
-      throw new Error('usage: node scripts/workspace.ts check | new-codex <name> | link-codex <name>');
+      throw new Error('usage: node scripts/workspace.ts check | new-codex <name> | link-codex <name> | link-opencode <name>');
     }
   } catch (error) {
     console.error(`workspace: ${error instanceof Error ? error.message : String(error)}`);

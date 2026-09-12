@@ -1,4 +1,4 @@
-import { useMemo, useReducer, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef } from "react";
 import type { ReactNode } from "react";
 import { useSnapshot } from "../hooks/use-snapshot.ts";
 import { filterCalls, filterOptions } from "./filters.ts";
@@ -10,15 +10,17 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(viewerReducer, initialViewerState);
   const searchRef = useRef<HTMLInputElement>(null);
   const returnFocusRef = useRef<HTMLElement>(null);
+  const urlInitialized = useRef(false);
   useSnapshot(state.live, dispatch);
 
-  const options = useMemo(() => filterOptions(state.snapshot), [state.snapshot]);
+  const dataset = state.snapshot?.harnesses.find((candidate) => candidate.harness === state.selectedHarness);
+  const options = useMemo(() => filterOptions(dataset), [dataset]);
   const calls = useMemo(
-    () => filterCalls(state.snapshot?.calls ?? [], state.filters, Date.now()),
-    [state.snapshot, state.filters, state.updated],
+    () => filterCalls(dataset?.calls ?? [], state.filters, Date.now()),
+    [dataset, state.filters, state.updated],
   );
-  const selectedCall = state.snapshot?.calls.find((call) => call.id === state.selectedCallId);
-  const value = useMemo(() => ({ ...state, calls, options, selectedCall }), [state, calls, options, selectedCall]);
+  const selectedCall = dataset?.calls.find((call) => call.id === state.selectedCallId);
+  const value = useMemo(() => ({ ...state, calls, options, selectedCall, dataset }), [state, calls, options, selectedCall, dataset]);
   const focus = useMemo(() => ({ searchRef, returnFocusRef }), []);
   const actions = useMemo<ViewerActions>(() => ({
     toggleLive: () => dispatch({ type: "liveToggled" }),
@@ -31,7 +33,23 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
     },
     closeInspector: () => dispatch({ type: "inspectorClosed" }),
     selectPayloadTab: (tab) => dispatch({ type: "payloadTabChanged", tab }),
+    selectHarness: (harness) => dispatch({ type: "harnessSelected", harness }),
   }), []);
+
+  useEffect(() => {
+    if (!state.snapshot || urlInitialized.current) return;
+    urlInitialized.current = true;
+    const requested = new URLSearchParams(window.location.search).get("harness");
+    if (requested === "codex" || requested === "opencode") dispatch({ type: "harnessSelected", harness: requested });
+  }, [state.snapshot]);
+
+  useEffect(() => {
+    if (!state.selectedHarness) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("harness") === state.selectedHarness) return;
+    url.searchParams.set("harness", state.selectedHarness);
+    window.history.replaceState(null, "", url);
+  }, [state.selectedHarness]);
 
   return (
     <ViewerStateContext value={value}>

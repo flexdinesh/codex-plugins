@@ -6,7 +6,7 @@ import { Badge } from "../components/ui/badge.tsx";
 import { useViewerActions, useViewerFocus, useViewerState } from "../state/viewer-context.ts";
 
 export function CallExplorer() {
-  const { calls, snapshot, filters, options, limit, selectedCallId, updated } = useViewerState();
+  const { calls, snapshot, dataset, filters, options, limit, selectedCallId, updated } = useViewerState();
   const { changeFilter, resetFilters, openCall, showMore } = useViewerActions();
   const { searchRef } = useViewerFocus();
 
@@ -26,20 +26,22 @@ export function CallExplorer() {
       <div className="calls-heading flex items-center justify-between gap-4 px-4 pt-5 sm:px-6">
         <div>
           <h2 id="calls-heading" className="flex items-center gap-2 text-lg font-semibold">Call explorer <Badge id="shown-count">{number(calls.length)}</Badge></h2>
-          <p className="mt-2 text-sm text-muted">Click a call to inspect its input, result, and original events.</p>
+          <p className="mt-2 text-sm text-muted">{dataset?.harness === "opencode"
+            ? "Inspect native arguments, results, identifiers, and hook events."
+            : "Inspect input, result, repository snapshots, and original events."}</p>
         </div>
         <span id="updated" className="updated hidden text-xs text-muted sm:block" aria-live="polite">{updated}</span>
       </div>
       <Filters
-        filters={filters} options={options} homeDirectory={snapshot?.homeDirectory}
+        filters={filters} options={options} homeDirectory={snapshot?.homeDirectory} dataset={dataset}
         searchRef={searchRef} onChange={changeFilter} onClear={resetFilters}
       />
       <CallTable
-        calls={calls.slice(0, limit)} homeDirectory={snapshot?.homeDirectory}
+        calls={calls.slice(0, limit)} homeDirectory={snapshot?.homeDirectory} dataset={dataset}
         selected={selectedCallId} onOpen={openCall}
       />
-      <CallEmptyState snapshot={snapshot} count={calls.length} />
-      <CallTableFooter snapshot={snapshot} hasMore={calls.length > limit} onMore={showMore} />
+      <CallEmptyState snapshot={snapshot} dataset={dataset} count={calls.length} />
+      <CallTableFooter dataset={dataset} hasMore={calls.length > limit} onMore={showMore} />
     </section>
   );
 }

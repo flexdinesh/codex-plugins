@@ -25,6 +25,7 @@ function call(index: number, overrides: Partial<ToolCall> = {}): ToolCall {
   };
   return {
     id: `call-${index}`, time, tool: "Bash", session: "session-main", turn: "turn-1", cwd,
+    harness: "codex", apiVersion: null, callId: `call-${index}`, message: "", agent: "", title: "", resultMetadata: null,
     status: "completed", durationMs: 120, input, output, pre, post, ...overrides,
   };
 }
@@ -41,9 +42,26 @@ function contextCall(index: number, root: string, cwd: string): ToolCall {
 
 function snapshot(calls: ToolCall[]): Snapshot {
   return {
-    homeDirectory: home, calls, source: `${home}/.codex/logs/codex-tool-calls.jsonl`,
-    missing: false, truncated: false, skipped: 0, totalEvents: calls.length * 2, demo: false,
+    homeDirectory: home, harnesses: [{ harness: "codex", label: "Codex", apiVersion: null, calls,
+      source: `${home}/.codex/logs/codex-tool-calls.jsonl`, missing: false, truncated: false,
+      skipped: 0, totalEvents: calls.length * 2 }], demo: false,
   };
+}
+
+function openCodeV1Snapshot(): Snapshot {
+  const time = now.toISOString();
+  const pre: LogRecord = { logged_at: time, harness: "opencode", api_version: 1, hook: "tool.execute.before",
+    event: { input: { tool: "bash", sessionID: "v1-session", callID: "v1-call" }, output: { args: { command: "pwd" } } } };
+  const post: LogRecord = { logged_at: new Date(now.getTime() + 50).toISOString(), harness: "opencode", api_version: 1,
+    hook: "tool.execute.after", event: { input: { tool: "bash", sessionID: "v1-session", callID: "v1-call", args: { command: "pwd" } },
+      output: { title: "Working directory", output: "/work", metadata: { exit: 0 } } } };
+  const value: ToolCall = {
+    id: "v1-call", harness: "opencode", apiVersion: 1, time, tool: "bash", session: "v1-session", turn: "",
+    callId: "v1-call", message: "", agent: "", title: "Working directory", cwd: "/work", status: "completed",
+    durationMs: 50, input: { command: "pwd" }, output: "/work", resultMetadata: { exit: 0 }, pre, post,
+  };
+  return { harnesses: [{ harness: "opencode", label: "OpenCode", apiVersion: 1, calls: [value], source: "/logs/opencode-tool-calls.jsonl",
+    missing: false, truncated: false, skipped: 0, totalEvents: 2 }], demo: false };
 }
 
 async function mockSnapshot(page: Page, calls: ToolCall[]): Promise<void> {
@@ -70,6 +88,60 @@ test("committed Codex test data renders through the server", async ({ page }) =>
   await page.getByLabel("Filter by status").selectOption("awaiting");
   await expect(page.locator("#rows > tr")).toHaveCount(1);
   await expect(page.locator("#rows")).toContainText("notes.txt");
+  await expect(page.getByRole("navigation", { name: "Available harnesses" }).getByRole("button")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Codex tool activity" })).toHaveAttribute("aria-current", "page");
+});
+
+test("harness navigation selects native OpenCode view and keeps selection in the URL", async ({ page }) => {
+  await page.goto("/?harness=opencode");
+  await expect(page.getByRole("heading", { name: "OpenCode activity." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "OpenCode tool activity" })).toHaveAttribute("aria-current", "page");
+  await expect(page.locator("#source")).toHaveText("test-data/opencode-v2/opencode-tool-calls.jsonl");
+  await expect(page.locator("#rows > tr")).toHaveCount(3);
+  await expect(page.locator("#rows")).toContainText("Failed");
+  await expect(page.getByLabel("Filter by agent")).toHaveValue("all");
+  await page.getByLabel("Filter by agent").selectOption("explore");
+  await expect(page.locator("#rows > tr")).toHaveCount(1);
+  await page.locator("#rows > tr").click();
+  const details = page.getByRole("dialog", { name: "Tool call details" });
+  await expect(details).toContainText("OpenCode V2");
+  await expect(details).toContainText("msg-2");
+  await expect(details).toContainText("explore");
+  await expect(details).toContainText("oc-v2-call-2");
+  await page.getByRole("button", { name: "Close call details" }).click();
+  await page.getByRole("button", { name: "Codex tool activity" }).click();
+  await expect(page).toHaveURL(/\?harness=codex$/);
+  await expect(page.getByRole("heading", { name: "Codex activity." })).toBeVisible();
+  await expect(page.getByLabel("Filter by agent")).toHaveCount(0);
+});
+
+test("invalid harness URL falls back alphabetically", async ({ page }) => {
+  await page.goto("/?harness=missing");
+  await expect(page.getByRole("button", { name: "Codex tool activity" })).toHaveAttribute("aria-current", "page");
+  await expect(page).toHaveURL(/\?harness=codex$/);
+});
+
+test("OpenCode V1 view exposes title and result metadata without V2-only controls", async ({ page }) => {
+  await page.route("**/api/logs", (route) => route.fulfill({ json: openCodeV1Snapshot() }));
+  await page.goto("/");
+  await expect(page.getByRole("navigation", { name: "Available harnesses" }).getByRole("button")).toHaveCount(1);
+  await expect(page.getByLabel("Filter by agent")).toHaveCount(0);
+  await expect(page.locator("#rows")).toContainText("Result received");
+  await page.locator("#rows > tr").click();
+  const details = page.getByRole("dialog", { name: "Tool call details" });
+  await expect(details).toContainText("Working directory");
+  await page.getByRole("tab", { name: "Result", exact: true }).click();
+  await expect(page.getByRole("tabpanel")).toHaveText(JSON.stringify({ output: "/work", metadata: { exit: 0 } }, null, 2));
+});
+
+test("no-source state offers no harness choices", async ({ page }) => {
+  const empty: Snapshot = { harnesses: [], demo: false };
+  await page.route("**/api/logs", (route) => route.fulfill({ json: empty }));
+  await page.goto("/");
+  await expect(page.getByRole("navigation", { name: "Available harnesses" }).getByRole("button")).toHaveCount(0);
+  await expect(page.getByText("No harness data")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Waiting for your first tool call" })).toBeVisible();
+  await expect(page.locator("#empty-message")).toContainText("Available harnesses appear in the navigation");
 });
 
 test("filters calls, updates statistics, resets and focuses search with /", async ({ page }) => {
@@ -227,7 +299,7 @@ test("inspector tabs, clipboard, Git snapshots and keyboard focus preserve behav
   await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(JSON.stringify(value.output, null, 2));
   await page.getByRole("tab", { name: "Raw events" }).click();
-  await expect(page.getByRole("tabpanel")).toHaveText(JSON.stringify({ pre: value.pre, post: value.post }, null, 2));
+  await expect(page.getByRole("tabpanel")).toHaveText(JSON.stringify({ before: value.pre, after: value.post }, null, 2));
   await page.getByText("Git snapshots", { exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "Before tool" })).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "After tool" })).toBeVisible();
@@ -264,7 +336,7 @@ test("payload HTML remains text and production assets run without CSP violations
   await page.getByRole("tab", { name: "Result", exact: true }).click();
   await expect(page.getByRole("tabpanel")).toContainText("injected-image");
   await page.getByRole("tab", { name: "Raw events" }).click();
-  await expect(page.getByRole("tabpanel")).toHaveText(JSON.stringify({ pre: value.pre, post: value.post }, null, 2));
+  await expect(page.getByRole("tabpanel")).toHaveText(JSON.stringify({ before: value.pre, after: value.post }, null, 2));
   await expect(page.locator('img[src="/injected-image"]')).toHaveCount(0);
   await expect(page).toHaveTitle("Tool activity · Tool Logger");
   const brand = page.getByRole("link", { name: "Tool Logger home" });
@@ -277,10 +349,10 @@ test("payload HTML remains text and production assets run without CSP violations
 test("typography tokens scale with the browser root size", async ({ page }) => {
   await mockSnapshot(page, [call(0)]);
   await expect(page.locator("body")).toHaveCSS("font-size", "16px");
-  await expect(page.getByRole("heading", { name: "Tool activity." })).toHaveCSS("font-size", "32px");
+  await expect(page.getByRole("heading", { name: "Codex activity." })).toHaveCSS("font-size", "32px");
   await page.evaluate(() => { document.documentElement.style.fontSize = "125%"; });
   await expect(page.locator("body")).toHaveCSS("font-size", "20px");
-  await expect(page.getByRole("heading", { name: "Tool activity." })).toHaveCSS("font-size", "40px");
+  await expect(page.getByRole("heading", { name: "Codex activity." })).toHaveCSS("font-size", "40px");
   await expect(page.locator(".tool-title")).toHaveCSS("font-size", "17.5px");
 });
 
@@ -310,6 +382,7 @@ test("mobile preserves responsive containers, horizontal table scrolling and cal
   await page.setViewportSize({ width: 390, height: 844 });
   await mockSnapshot(page, [call(0)]);
   await expect(page.locator(".sidebar")).toBeHidden();
+  await expect(page.getByLabel("Select harness")).toBeVisible();
   await expect(page.getByRole("searchbox")).toBeVisible();
   for (const selector of [".shell", ".page-heading", ".filters", ".context-filters", ".table-wrap"]) {
     const bounds = await page.locator(selector).boundingBox();

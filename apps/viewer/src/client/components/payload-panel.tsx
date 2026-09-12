@@ -45,9 +45,11 @@ export function PayloadPanel({ call, tab, onTabChange }: {
   tab: PayloadTab;
   onTabChange: (tab: PayloadTab) => void;
 }) {
-  const value = tab === "input" ? call.input : tab === "output" ? call.output : { pre: call.pre, post: call.post };
+  const result = call.harness === "opencode" && call.apiVersion === 1 && call.resultMetadata !== null
+    ? { output: call.output, metadata: call.resultMetadata } : call.output;
+  const value = tab === "input" ? call.input : tab === "output" ? result : { before: call.pre, after: call.post };
   const payload = tab === "output" && !call.post
-    ? "No matching PostToolUse event in the current log window."
+    ? "No matching after-tool event in the current log window."
     : JSON.stringify(value, null, 2) ?? "";
   return (
     <>
