@@ -15,17 +15,36 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
-import { groupCalls, readLogs } from "../src/logs.ts";
+import { groupCalls, logPath, readLogs } from "../src/logs.ts";
 import { callContext, displayPath, isSnapshot, matchesContext, recordContext, repositoryLabel } from "../src/model.ts";
 import type { LogRecord } from "../src/model.ts";
 import { browserUrl, createViewer, interfaceUrls, openBrowser, shouldOpenBrowser } from "../src/server.ts";
-import { appendEvent } from '../../../plugins/tool-call-logger/scripts/log-tool-call.ts';
+import { appendEvent } from '../../../plugins/codex-tool-logger/scripts/log-tool-call.ts';
 
 function fixture(t: TestContext) {
   const directory = mkdtempSync(join(tmpdir(), "codex-viewer-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  return { directory, path: join(directory, "tool-calls.jsonl") };
+  return { directory, path: join(directory, "codex-tool-calls.jsonl") };
 }
+
+test("prefers Codex logs and falls back to legacy logs without modifying either", (t) => {
+  const f = fixture(t);
+  const legacy = join(f.directory, "tool-calls.jsonl");
+  const original = process.env.TOOL_LOGGER_STATE_DIR;
+  process.env.TOOL_LOGGER_STATE_DIR = f.directory;
+  t.after(() => {
+    if (original === undefined) delete process.env.TOOL_LOGGER_STATE_DIR;
+    else process.env.TOOL_LOGGER_STATE_DIR = original;
+  });
+  assert.equal(logPath(), f.path);
+  writeFileSync(legacy, "legacy\n");
+  assert.equal(logPath(), legacy);
+  assert.equal(readFileSync(legacy, "utf8"), "legacy\n");
+  assert.equal(existsSync(f.path), false);
+  writeFileSync(f.path, "current\n");
+  assert.equal(logPath(), f.path);
+  assert.equal(readFileSync(legacy, "utf8"), "legacy\n");
+});
 
 test("lists every IPv4 interface as a reachable viewer URL", () => {
   assert.deepEqual(interfaceUrls(4317, {
@@ -43,7 +62,7 @@ test("path labels shorten only the configured home directory, including a Docker
   assert.equal(displayPath("/Users/alex", "/Users/alex/"), "~");
   assert.equal(displayPath("/Users/alex-other/repo", "/Users/alex"), "/Users/alex-other/repo");
   assert.equal(displayPath("/Users/sam/repo", "/Users/alex"), "/Users/sam/repo");
-  assert.equal(displayPath("/logs/tool-calls.jsonl", "/Users/alex"), "/logs/tool-calls.jsonl");
+  assert.equal(displayPath("/logs/codex-tool-calls.jsonl", "/Users/alex"), "/logs/codex-tool-calls.jsonl");
   assert.equal(displayPath("/work/repo"), "/work/repo");
 });
 
@@ -342,7 +361,7 @@ test("production serves only compiled assets and never follows symlinks", async 
   symlinkSync(f.path, join(f.directory, "assets", "linked.js"));
   const base = await listen(t, { buildDirectory: f.directory, source: f.path });
   assert.equal((await fetch(`${base}/assets/app.js`)).status, 200);
-  for (const path of ["/assets/app.js.map", "/assets/secret.json", "/assets/linked.js", "/src/server.ts", "/tool-calls.jsonl", "/client.js", "/assets/missing.js"]) {
+  for (const path of ["/assets/app.js.map", "/assets/secret.json", "/assets/linked.js", "/src/server.ts", "/codex-tool-calls.jsonl", "/client.js", "/assets/missing.js"]) {
     assert.equal((await fetch(`${base}${path}`)).status, 404, path);
   }
   assert.equal((await fetch(`${base}/%ZZ`)).status, 400);

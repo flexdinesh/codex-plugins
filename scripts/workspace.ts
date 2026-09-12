@@ -57,6 +57,20 @@ export function check(root: string): Catalog {
   const catalog = readJson(join(root, CATALOG));
   const name = catalog.name;
   validateName(name);
+  const directories = readdirSync(join(root, 'plugins'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  const codexNames = new Set<string>();
+  for (const directory of directories) {
+    validateName(directory);
+    const plugin = join(root, 'plugins', directory);
+    const packageJson = readJson(join(plugin, 'package.json'));
+    if (packageJson.name !== directory || packageJson.private !== true) {
+      throw new Error(`${directory}: package name/private mismatch`);
+    }
+    const marker = lstatSync(join(plugin, '.codex-plugin'), { throwIfNoEntry: false });
+    if (marker && !marker.isDirectory()) throw new Error(`${directory}: .codex-plugin must be a directory`);
+    if (marker) codexNames.add(directory);
+  }
   const seen = new Set<string>();
   const plugins = array(catalog.plugins).map((value): PluginEntry => {
     const entry = object(value);
@@ -89,15 +103,13 @@ export function check(root: string): Catalog {
     }
     return { ...entry, name: pluginName, source: { source: 'local', path: source.path } };
   });
-  const directories = readdirSync(join(root, 'plugins'), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-  if (directories.length !== seen.size || directories.some((name) => !seen.has(name))) {
-    throw new Error('catalog and plugins/ differ');
+  if (codexNames.size !== seen.size || [...codexNames].some((pluginName) => !seen.has(pluginName))) {
+    throw new Error('catalog and Codex plugins differ');
   }
   return { ...catalog, name, plugins };
 }
 
-export function newPlugin(root: string, name: string): void {
+export function newCodexPlugin(root: string, name: string): void {
   validateName(name);
   const catalog = check(root);
   const plugin = join(root, 'plugins', name);
@@ -137,12 +149,12 @@ function expandHome(path: string): string {
   return path.startsWith('~/') ? join(homedir(), path.slice(2)) : path;
 }
 
-type LinkOptions = {
+type CodexLinkOptions = {
   codexHome?: string;
   runCodex?: (args: string[]) => void;
 };
 
-export function linkPlugin(root: string, name: string, options: LinkOptions = {}): void {
+export function linkCodexPlugin(root: string, name: string, options: CodexLinkOptions = {}): void {
   validateName(name);
   const catalog = check(root);
   if (!catalog.plugins.some((entry) => entry.name === name)) throw new Error(`unknown plugin: ${name}`);
@@ -213,12 +225,12 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const [command, name, ...extra] = process.argv.slice(2);
     if (command === 'check' && name === undefined) {
-      console.log(`Validated ${check(ROOT).plugins.length} local plugin(s).`);
-    } else if ((command === 'new' || command === 'link') && name !== undefined && extra.length === 0) {
-      if (command === 'new') newPlugin(ROOT, name);
-      else linkPlugin(ROOT, name);
+      console.log(`Validated ${check(ROOT).plugins.length} local Codex plugin(s).`);
+    } else if ((command === 'new-codex' || command === 'link-codex') && name !== undefined && extra.length === 0) {
+      if (command === 'new-codex') newCodexPlugin(ROOT, name);
+      else linkCodexPlugin(ROOT, name);
     } else {
-      throw new Error('usage: node scripts/workspace.ts check | new <name> | link <name>');
+      throw new Error('usage: node scripts/workspace.ts check | new-codex <name> | link-codex <name>');
     }
   } catch (error) {
     console.error(`workspace: ${error instanceof Error ? error.message : String(error)}`);

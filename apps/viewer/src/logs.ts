@@ -1,4 +1,4 @@
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -35,7 +35,9 @@ export function logPath(): string {
       : override.startsWith("~/")
         ? join(homedir(), override.slice(2))
         : override;
-  return join(directory, "tool-calls.jsonl");
+  const current = join(directory, "codex-tool-calls.jsonl");
+  const legacy = join(directory, "tool-calls.jsonl");
+  return existsSync(current) || !existsSync(legacy) ? current : legacy;
 }
 
 function text(event: JsonObject, key: string): string {

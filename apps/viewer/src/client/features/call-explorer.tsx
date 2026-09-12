@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { CallEmptyState, CallTable, CallTableFooter } from "../components/call-table.tsx";
 import { Filters } from "../components/filters.tsx";
 import { number } from "../format.ts";
+import { Badge } from "../components/ui/badge.tsx";
 import { useViewerActions, useViewerFocus, useViewerState } from "../state/viewer-context.ts";
 
 export function CallExplorer() {
@@ -21,13 +22,13 @@ export function CallExplorer() {
   }, [selectedCallId, searchRef]);
 
   return (
-    <section className="panel calls-panel" aria-labelledby="calls-heading">
-      <div className="calls-heading">
+    <section className="panel calls-panel overflow-hidden rounded-lg border border-border bg-surface" aria-labelledby="calls-heading">
+      <div className="calls-heading flex items-center justify-between gap-4 px-4 pt-5 sm:px-6">
         <div>
-          <h2 id="calls-heading">Call explorer <span id="shown-count" className="count-badge">{number(calls.length)}</span></h2>
-          <p>Click a call to inspect its input, result, and original events.</p>
+          <h2 id="calls-heading" className="flex items-center gap-2 text-lg font-semibold">Call explorer <Badge id="shown-count">{number(calls.length)}</Badge></h2>
+          <p className="mt-2 text-sm text-muted">Click a call to inspect its input, result, and original events.</p>
         </div>
-        <span id="updated" className="updated" aria-live="polite">{updated}</span>
+        <span id="updated" className="updated hidden text-xs text-muted sm:block" aria-live="polite">{updated}</span>
       </div>
       <Filters
         filters={filters} options={options} homeDirectory={snapshot?.homeDirectory}

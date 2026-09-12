@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { CATALOG, ROOT, check, linkPlugin, newPlugin, readJson, writeJson } from '../scripts/workspace.ts';
+import { CATALOG, ROOT, check, linkCodexPlugin, newCodexPlugin, readJson, writeJson } from '../scripts/workspace.ts';
 
 function fixture(t: TestContext) {
   const temp = mkdtempSync(join(tmpdir(), 'codex workspace '));
@@ -18,18 +18,18 @@ function fixture(t: TestContext) {
   mkdirSync(dirname(join(root, CATALOG)), { recursive: true });
   cpSync(join(ROOT, CATALOG), join(root, CATALOG));
   const codexHome = join(temp, 'codex');
-  const source = join(root, 'plugins/tool-call-logger');
+  const source = join(root, 'plugins/codex-tool-logger');
   const version = readJson(join(source, '.codex-plugin/plugin.json')).version;
   assert.equal(typeof version, 'string');
-  const cache = join(codexHome, 'plugins/cache/tool-logger/tool-call-logger', String(version));
+  const cache = join(codexHome, 'plugins/cache/tool-logger/codex-tool-logger', String(version));
   return { temp, root, codexHome, cache, source };
 }
 
 test('new plugin is an independent native TypeScript package and registered once', (t) => {
   const f = fixture(t);
   const original = readFileSync(join(f.source, '.codex-plugin/plugin.json'));
-  newPlugin(f.root, 'example-two');
-  assert.deepEqual(check(f.root).plugins.map((entry) => entry.name), ['tool-call-logger', 'example-two']);
+  newCodexPlugin(f.root, 'example-two');
+  assert.deepEqual(check(f.root).plugins.map((entry) => entry.name), ['codex-tool-logger', 'example-two']);
   const created = join(f.root, 'plugins/example-two');
   assert.ok(existsSync(join(created, 'skills/example-two/SKILL.md')));
   assert.deepEqual(readJson(join(created, 'package.json')), {
@@ -37,7 +37,7 @@ test('new plugin is an independent native TypeScript package and registered once
   });
   assert.deepEqual(readFileSync(join(f.source, '.codex-plugin/plugin.json')), original);
   const catalog = readFileSync(join(f.root, CATALOG));
-  assert.throws(() => newPlugin(f.root, 'example-two'), /already exists/);
+  assert.throws(() => newCodexPlugin(f.root, 'example-two'), /already exists/);
   assert.deepEqual(readFileSync(join(f.root, CATALOG)), catalog);
   const script = join(created, 'example.ts');
   writeFileSync(script, 'const value: string = "native"; console.log(value); export {};\n');
@@ -48,7 +48,7 @@ test('rejects unsafe names without changing the catalog', (t) => {
   const f = fixture(t);
   const catalog = readFileSync(join(f.root, CATALOG));
   for (const name of ['', '../escape', 'Upper', 'has space', 'foo/bar']) {
-    assert.throws(() => newPlugin(f.root, name), /kebab-case/);
+    assert.throws(() => newCodexPlugin(f.root, name), /kebab-case/);
   }
   assert.deepEqual(readFileSync(join(f.root, CATALOG)), catalog);
 });
@@ -66,6 +66,23 @@ test('check rejects missing and escaping component paths', (t) => {
   assert.throws(() => check(f.root), /escapes its root/);
 });
 
+test('check validates every plugin package but registers only Codex plugins', (t) => {
+  const f = fixture(t);
+  const packagePath = join(f.root, 'plugins/opencode-tool-logger/package.json');
+  const packageJson = readJson(packagePath);
+  assert.equal(check(f.root).plugins.length, 1);
+  writeJson(packagePath, { ...packageJson, name: 'wrong-name' });
+  assert.throws(() => check(f.root), /package name\/private mismatch/);
+  writeJson(packagePath, { ...packageJson, private: false });
+  assert.throws(() => check(f.root), /package name\/private mismatch/);
+  writeJson(packagePath, packageJson);
+  mkdirSync(join(f.root, 'plugins/opencode-tool-logger/.codex-plugin'));
+  writeJson(join(f.root, 'plugins/opencode-tool-logger/.codex-plugin/plugin.json'), {
+    name: 'opencode-tool-logger', version: '0.1.0', description: 'Unexpected Codex plugin',
+  });
+  assert.throws(() => check(f.root), /catalog and Codex plugins differ/);
+});
+
 test('link preserves installed copy, points to live source, and is idempotent', (t) => {
   const f = fixture(t);
   const calls: string[][] = [];
@@ -76,10 +93,10 @@ test('link preserves installed copy, points to live source, and is idempotent', 
       if (args[1] === 'add') cpSync(f.source, f.cache, { recursive: true });
     },
   };
-  linkPlugin(f.root, 'tool-call-logger', options);
+  linkCodexPlugin(f.root, 'codex-tool-logger', options);
   assert.deepEqual(calls, [
     ['plugin', 'marketplace', 'add', f.root],
-    ['plugin', 'add', 'tool-call-logger@tool-logger'],
+    ['plugin', 'add', 'codex-tool-logger@tool-logger'],
   ]);
   assert.ok(lstatSync(f.cache).isDirectory(), 'Codex discovery requires a real version directory');
   assert.equal(lstatSync(f.cache).isSymbolicLink(), false);
@@ -96,7 +113,7 @@ test('link preserves installed copy, points to live source, and is idempotent', 
   writeFileSync(join(f.source, 'scripts/changed.ts'), 'export const value = "live edit";');
   assert.equal(readFileSync(join(f.cache, 'scripts/changed.ts'), 'utf8'), 'export const value = "live edit";');
   writeFileSync(join(f.source, 'new-root-file.txt'), 'new entry');
-  linkPlugin(f.root, 'tool-call-logger', options);
+  linkCodexPlugin(f.root, 'codex-tool-logger', options);
   assert.equal(readFileSync(join(f.cache, 'new-root-file.txt'), 'utf8'), 'new entry');
   assert.equal(calls.length, 2);
   const backups = join(f.codexHome, 'plugins/local-link-backups');
@@ -113,13 +130,13 @@ test('relink repairs symlinked manifests and refreshes manifest edits', (t) => {
   for (const entry of readdirSync(f.source)) symlinkSync(join(realpathSync(f.source), entry), join(f.cache, entry));
   const path = join(f.source, '.codex-plugin/plugin.json');
   writeJson(path, { ...readJson(path), description: 'Updated manifest' });
-  linkPlugin(f.root, 'tool-call-logger', {
+  linkCodexPlugin(f.root, 'codex-tool-logger', {
     codexHome: f.codexHome, runCodex: () => assert.fail('already registered'),
   });
   assert.ok(lstatSync(join(f.cache, '.codex-plugin')).isDirectory());
   assert.equal(readJson(join(f.cache, '.codex-plugin/plugin.json')).description, 'Updated manifest');
   writeJson(path, { ...readJson(path), description: 'Refreshed again' });
-  linkPlugin(f.root, 'tool-call-logger', {
+  linkCodexPlugin(f.root, 'codex-tool-logger', {
     codexHome: f.codexHome, runCodex: () => assert.fail('already registered'),
   });
   assert.equal(readJson(join(f.cache, '.codex-plugin/plugin.json')).description, 'Refreshed again');
@@ -129,10 +146,10 @@ test('link refuses existing installs and unrelated links before invoking Codex',
   const f = fixture(t);
   mkdirSync(f.cache, { recursive: true });
   const options = { codexHome: f.codexHome, runCodex: () => assert.fail('must not invoke Codex') };
-  assert.throws(() => linkPlugin(f.root, 'tool-call-logger', options), /cache already exists/);
+  assert.throws(() => linkCodexPlugin(f.root, 'codex-tool-logger', options), /cache already exists/);
   rmSync(f.cache, { recursive: true });
   symlinkSync(f.temp, f.cache, 'dir');
-  assert.throws(() => linkPlugin(f.root, 'tool-call-logger', options), /unrelated link/);
+  assert.throws(() => linkCodexPlugin(f.root, 'codex-tool-logger', options), /unrelated link/);
 });
 
 test('link rejects versions that could escape the cache directory', (t) => {
@@ -141,7 +158,7 @@ test('link rejects versions that could escape the cache directory', (t) => {
   const manifest = readJson(path);
   for (const version of ['../escape', '/tmp/escape', '.', '..']) {
     writeJson(path, { ...manifest, version });
-    assert.throws(() => linkPlugin(f.root, 'tool-call-logger', {
+    assert.throws(() => linkCodexPlugin(f.root, 'codex-tool-logger', {
       codexHome: f.codexHome,
       runCodex: () => assert.fail('must not invoke Codex'),
     }), /safe cache directory/);
@@ -150,8 +167,8 @@ test('link rejects versions that could escape the cache directory', (t) => {
 
 test('workspace CLI runs natively and rejects invalid invocations', () => {
   const script = join(ROOT, 'scripts/workspace.ts');
-  assert.match(execFileSync(process.execPath, [script, 'check'], { encoding: 'utf8' }), /Validated 1 local plugin/);
-  const result = spawnSync(process.execPath, [script, 'new'], { encoding: 'utf8' });
+  assert.match(execFileSync(process.execPath, [script, 'check'], { encoding: 'utf8' }), /Validated 1 local Codex plugin/);
+  const result = spawnSync(process.execPath, [script, 'new-codex'], { encoding: 'utf8' });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /usage:/);
 });

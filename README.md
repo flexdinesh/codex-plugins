@@ -1,28 +1,41 @@
 # Tool Logger
 
-Install the Tool Call Logger plugin and view Codex tool activity in your browser.
+Log tool activity from supported coding harnesses and inspect it in a local web UI.
 
 Requires macOS or Linux, Node.js 26, pnpm 11, and Codex with plugins and hooks enabled.
 
-## Add the plugin
+## Packages
+
+- `plugins/codex-tool-logger`: working Codex hooks and collector.
+- `plugins/opencode-tool-logger`: placeholder only; implementation is out of scope.
+- `apps/viewer`: read-only Vite and React web UI plus its Node.js server.
+
+## Add the Codex plugin
 
 From this repository:
 
 ```sh
 pnpm install
-pnpm run link tool-call-logger
+pnpm run link:codex codex-tool-logger
 ```
+
+If `tool-call-logger@tool-logger` was installed previously, remove it first. Keeping
+both IDs installed runs duplicate hooks.
 
 Then:
 
 1. Restart Codex.
 2. Open `/hooks` in Codex.
-3. Review and trust the two Tool Call Logger hooks.
+3. Review and trust the two Codex Tool Logger hooks.
 4. Start a new task and use any tool.
 
 The trusted hooks capture each tool call before and after it runs, then append the
-events to `~/.local/state/tool-logger/tool-calls.jsonl`. The viewer reads this
-file. Nothing is published.
+events to `~/.local/state/tool-logger/codex-tool-calls.jsonl`. Future harness plugins
+use separate files in the same directory. Set `TOOL_LOGGER_STATE_DIR` to override
+that shared directory. Nothing is published.
+
+The viewer prefers `codex-tool-calls.jsonl`. If it is absent, the viewer reads the
+legacy `tool-calls.jsonl` in place without renaming, copying, or deleting it.
 
 ## Run the viewer
 

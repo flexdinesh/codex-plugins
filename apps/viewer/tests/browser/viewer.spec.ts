@@ -41,7 +41,7 @@ function contextCall(index: number, root: string, cwd: string): ToolCall {
 
 function snapshot(calls: ToolCall[]): Snapshot {
   return {
-    homeDirectory: home, calls, source: `${home}/.codex/logs/tool-calls.jsonl`,
+    homeDirectory: home, calls, source: `${home}/.codex/logs/codex-tool-calls.jsonl`,
     missing: false, truncated: false, skipped: 0, totalEvents: calls.length * 2, demo: false,
   };
 }
@@ -61,7 +61,7 @@ test("filters calls, updates statistics, resets and focuses search with /", asyn
   ]);
   await expect(page.locator("#stat-completed")).toHaveText("2");
   await expect(page.locator("#stat-awaiting")).toHaveText("1");
-  await expect(page.locator("#source")).toHaveText("~/.codex/logs/tool-calls.jsonl");
+  await expect(page.locator("#source")).toHaveText("~/.codex/logs/codex-tool-calls.jsonl");
   await page.keyboard.press("/");
   await expect(page.getByRole("searchbox", { name: "Search tool calls" })).toBeFocused();
   await page.getByRole("searchbox").fill("command-120");
@@ -257,12 +257,12 @@ test("payload HTML remains text and production assets run without CSP violations
 
 test("typography tokens scale with the browser root size", async ({ page }) => {
   await mockSnapshot(page, [call(0)]);
-  await expect(page.locator("body")).toHaveCSS("font-size", "13px");
-  await expect(page.getByRole("heading", { name: "Tool activity." })).toHaveCSS("font-size", "34.125px");
+  await expect(page.locator("body")).toHaveCSS("font-size", "16px");
+  await expect(page.getByRole("heading", { name: "Tool activity." })).toHaveCSS("font-size", "32px");
   await page.evaluate(() => { document.documentElement.style.fontSize = "125%"; });
   await expect(page.locator("body")).toHaveCSS("font-size", "20px");
-  await expect(page.getByRole("heading", { name: "Tool activity." })).toHaveCSS("font-size", "52.5px");
-  await expect(page.locator(".tool-title")).toHaveCSS("font-size", "20px");
+  await expect(page.getByRole("heading", { name: "Tool activity." })).toHaveCSS("font-size", "40px");
+  await expect(page.locator(".tool-title")).toHaveCSS("font-size", "17.5px");
 });
 
 test("live updates preserve inspector state and eviction restores focus without stale selection", async ({ page }) => {
@@ -308,4 +308,21 @@ test("mobile preserves responsive containers, horizontal table scrolling and cal
   expect(bounds?.width).toBe(390);
   await page.getByRole("button", { name: "Close call details" }).click();
   await expect(dialog).toBeHidden();
+});
+
+test("tablet and desktop preserve the shared responsive hierarchy", async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 900 });
+  await mockSnapshot(page, [call(0)]);
+  await expect(page.locator(".sidebar")).toHaveCSS("width", "64px");
+  await expect(page.locator(".shell")).toHaveCSS("margin-left", "64px");
+  expect(await page.locator(".stats").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(2);
+  expect(await page.locator(".charts").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(1);
+  await expect(page.locator(".tools-panel")).toBeVisible();
+
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await expect(page.locator(".sidebar")).toHaveCSS("width", "224px");
+  await expect(page.locator(".shell")).toHaveCSS("margin-left", "224px");
+  await expect(page.locator(".stats > article")).toHaveCount(4);
+  const chartColumns = await page.locator(".charts").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  expect(chartColumns).toBe(2);
 });

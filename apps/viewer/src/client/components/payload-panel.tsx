@@ -1,6 +1,9 @@
+import { Check, Copy } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ToolCall } from "../../model.ts";
 import type { PayloadTab } from "../state/viewer-reducer.ts";
+import { Button } from "./ui/button.tsx";
+import { TabsList, TabsTrigger } from "./ui/tabs.tsx";
 
 const tabs: { name: PayloadTab; label: string }[] = [
   { name: "input", label: "Input" },
@@ -34,7 +37,7 @@ function CopyPayloadButton({ payload }: { payload: string }) {
     timer.current = setTimeout(() => setLabel("Copy JSON"), 1500);
   }
 
-  return <button id="copy" className="text-button" type="button" onClick={() => { void copy(); }}>{label}</button>;
+  return <Button id="copy" variant="ghost" size="compact" onClick={() => { void copy(); }}>{label === "Copied" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}{label}</Button>;
 }
 
 export function PayloadPanel({ call, tab, onTabChange }: {
@@ -48,18 +51,18 @@ export function PayloadPanel({ call, tab, onTabChange }: {
     : JSON.stringify(value, null, 2) ?? "";
   return (
     <>
-      <div className="detail-tabs" role="tablist" aria-label="Call payload">
+      <TabsList className="detail-tabs" aria-label="Call payload">
         {tabs.map(({ name, label }) => (
-          <button key={name} id={`tab-${name}`} role="tab" aria-selected={tab === name} aria-controls="payload" type="button" onClick={() => onTabChange(name)}>
+          <TabsTrigger key={name} id={`tab-${name}`} aria-selected={tab === name} aria-controls="payload" onClick={() => onTabChange(name)}>
             {label}
-          </button>
+          </TabsTrigger>
         ))}
-      </div>
-      <div className="payload-heading">
+      </TabsList>
+      <div className="payload-heading mt-5 mb-2 flex items-center justify-between gap-3 text-xs font-medium tracking-wide text-muted">
         <span id="payload-label">{tab === "input" ? "TOOL INPUT" : tab === "output" ? "TOOL RESULT" : "ORIGINAL HOOK EVENTS"}</span>
         <CopyPayloadButton payload={payload} />
       </div>
-      <pre id="payload" tabIndex={0} role="tabpanel" aria-labelledby={`tab-${tab}`}>{payload}</pre>
+      <pre id="payload" className="max-h-[58vh] overflow-auto rounded-md border border-border bg-surface-secondary p-4 font-mono text-sm leading-7 text-secondary whitespace-pre-wrap wrap-break-word outline-none focus-visible:ring-2 focus-visible:ring-ring" tabIndex={0} role="tabpanel" aria-labelledby={`tab-${tab}`}>{payload}</pre>
     </>
   );
 }

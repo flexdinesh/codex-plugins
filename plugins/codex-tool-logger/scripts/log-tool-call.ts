@@ -51,7 +51,7 @@ export function appendEvent(
   }) + '\n');
   const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND
     | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-  const fd = openSync(join(directory, 'tool-calls.jsonl'), flags, 0o600);
+  const fd = openSync(join(directory, 'codex-tool-calls.jsonl'), flags, 0o600);
   try {
     if (!fstatSync(fd).isFile()) throw new Error('log destination must be a regular file');
     // One O_APPEND write per record: the local POSIX filesystem serializes appends.
@@ -67,7 +67,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     appendEvent(parseEvent(readFileSync(0, 'utf8')));
   } catch (error) {
-    console.error(`tool-call-logger: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`codex-tool-logger: ${error instanceof Error ? error.message : String(error)}`);
     // Exit 1 reports a hook failure. Exit 2 would block a PreToolUse call.
     process.exitCode = 1;
   }

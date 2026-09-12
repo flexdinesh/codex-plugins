@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { CATALOG, ROOT, linkPlugin, object } from '../scripts/workspace.ts';
+import { CATALOG, ROOT, linkCodexPlugin, object } from '../scripts/workspace.ts';
 
 function listHooks(cwd: string, env: NodeJS.ProcessEnv): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -69,7 +69,7 @@ test('real Codex loads both linked hooks and their commands run under fish when 
   const codexHome = join(temp, 'codex');
   mkdirSync(codexHome);
   const env = { ...process.env, CODEX_HOME: codexHome, TOOL_LOGGER_STATE_DIR: join(temp, 'logs') };
-  linkPlugin(root, 'tool-call-logger', {
+  linkCodexPlugin(root, 'codex-tool-logger', {
     codexHome,
     runCodex: (args) => { execFileSync('codex', args, { env, timeout: 20_000, stdio: 'pipe' }); },
   });
@@ -78,7 +78,7 @@ test('real Codex loads both linked hooks and their commands run under fish when 
   const entry = object(result.data[0]);
   assert.deepEqual(entry.errors, []);
   assert.ok(Array.isArray(entry.hooks));
-  const hooks = entry.hooks.map(object).filter((hook) => hook.pluginId === 'tool-call-logger@tool-logger');
+  const hooks = entry.hooks.map(object).filter((hook) => hook.pluginId === 'codex-tool-logger@tool-logger');
   assert.deepEqual(hooks.map((hook) => hook.eventName).sort(), ['postToolUse', 'preToolUse']);
   for (const hook of hooks) {
     assert.equal(hook.enabled, true);
@@ -94,6 +94,6 @@ test('real Codex loads both linked hooks and their commands run under fish when 
     });
     assert.equal(stdout, '');
   }
-  const lines = readFileSync(join(env.TOOL_LOGGER_STATE_DIR, 'tool-calls.jsonl'), 'utf8').trim().split('\n');
+  const lines = readFileSync(join(env.TOOL_LOGGER_STATE_DIR, 'codex-tool-calls.jsonl'), 'utf8').trim().split('\n');
   assert.equal(lines.length, 2);
 });

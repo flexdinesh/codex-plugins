@@ -8,12 +8,12 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { appendEvent, parseEvent, stateDirectory } from '../plugins/tool-call-logger/scripts/log-tool-call.ts';
-import { collectMetadata } from '../plugins/tool-call-logger/scripts/context.ts';
-import { ensureState } from '../plugins/tool-call-logger/scripts/state.ts';
+import { appendEvent, parseEvent, stateDirectory } from '../plugins/codex-tool-logger/scripts/log-tool-call.ts';
+import { collectMetadata } from '../plugins/codex-tool-logger/scripts/context.ts';
+import { ensureState } from '../plugins/codex-tool-logger/scripts/state.ts';
 import { object, readJson, ROOT } from '../scripts/workspace.ts';
 
-const plugin = join(ROOT, 'plugins/tool-call-logger');
+const plugin = join(ROOT, 'plugins/codex-tool-logger');
 const script = join(plugin, 'scripts/log-tool-call.ts');
 
 function event(index = 0, phase = 'PreToolUse') {
@@ -28,7 +28,7 @@ function fixture(t: TestContext) {
   const temp = mkdtempSync(join(tmpdir(), 'codex logger '));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
   const directory = join(temp, 'state');
-  const log = join(directory, 'tool-calls.jsonl');
+  const log = join(directory, 'codex-tool-calls.jsonl');
   function run(input: string, command = process.execPath, args = [script], extraEnv = {}) {
     return new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
       const child = spawn(command, args, {
@@ -143,6 +143,7 @@ test('preserves all Codex fields and records collector and transcript metadata',
   assert.deepEqual(stored.event, payload);
   const metadata = object(stored.metadata);
   const collector = object(metadata.collector);
+  assert.equal(collector.name, 'codex-tool-logger');
   assert.equal(collector.version, '0.2.0');
   assert.equal(collector.node_version, process.version);
   assert.equal(typeof collector.pid, 'number');
@@ -204,7 +205,7 @@ test('default path uses home/.local/state; supports explicit state override', (t
   const directory = stateDirectory('', f.temp);
   assert.equal(directory, join(f.temp, '.local/state/tool-logger'));
   appendEvent(event(), directory);
-  assert.ok(existsSync(join(directory, 'tool-calls.jsonl')));
+  assert.ok(existsSync(join(directory, 'codex-tool-calls.jsonl')));
   assert.equal(stateDirectory('~/custom', f.temp), join(f.temp, 'custom'));
   assert.equal(stateDirectory(f.directory), f.directory);
 });
@@ -215,7 +216,7 @@ test('invalid events and malformed JSON fail without policy output or writes', a
     const result = await f.run(input);
     assert.equal(result.code, 1);
     assert.equal(result.stdout, '');
-    assert.match(result.stderr, /tool-call-logger:/);
+    assert.match(result.stderr, /codex-tool-logger:/);
   }
   assert.equal(existsSync(f.log), false);
   assert.throws(() => parseEvent('{}'), /expected PreToolUse or PostToolUse/);
@@ -238,7 +239,7 @@ test('write failures report failure without policy output', async (t) => {
   const result = await f.invoke(event());
   assert.equal(result.code, 1);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /tool-call-logger:/);
+  assert.match(result.stderr, /codex-tool-logger:/);
 });
 
 test('short writes fail without retrying fragments or overwriting history', (t) => {

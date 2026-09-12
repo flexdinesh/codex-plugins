@@ -1,13 +1,21 @@
 # Local plugin workspace
 
-- Keep plugins self-contained under `plugins/<name>/`.
-- Keep applications under `apps/<name>/`, with their own package.json scripts.
+- Organize the monorepo as:
+  - `plugins/codex-tool-logger/`: Codex plugin that logs Codex tool calls.
+  - `plugins/opencode-tool-logger/`: OpenCode plugin placeholder. OpenCode implementation is out of scope until explicitly requested.
+  - `apps/viewer/`: read-only web server and UI for querying and visualizing append-only tool-call logs.
+- Keep plugins self-contained under `plugins/<name>/` and applications under `apps/<name>/`.
+- Keep package scripts local to the package that owns the runnable task.
 - Each plugin is a private pnpm workspace package. Use pnpm 11 and keep pnpm-lock.yaml current.
-- Register each plugin in `.agents/plugins/marketplace.json`.
+- Register Codex plugins, and only Codex plugins, in `.agents/plugins/marketplace.json`.
 - Use local sources only. No publishing or runtime dependency on this repository's scripts.
 - Use TypeScript that runs directly on Node.js 26. Erasable syntax only; no build step for hooks, scripts, or servers. The viewer frontend uses React TSX and a Vite build.
 - Keep hook runtime dependencies limited to Node built-ins. Type-check with strict TypeScript.
 - Hook stdout affects Codex. Logging hooks must stay silent on stdout and never block tools.
-- Preserve append-only logging and serialization across concurrent processes.
+- Store all harness logs under one state directory: `~/.local/state/tool-logger/`, overridden as a directory by `TOOL_LOGGER_STATE_DIR`.
+- Keep one append-only log file per harness: `codex-tool-calls.jsonl` and `opencode-tool-calls.jsonl`.
+- Preserve append-only logging and serialization across concurrent processes. Never merge harness logs at write time.
+- Build viewer UI with Vite, React, Tailwind CSS, and shadcn/ui.
+- Use semantic token primitives and shared UI components. Follow top-level `DESIGN.md` for every visual change.
 - Define development commands in package.json scripts; use pnpm to run them.
 - Run `pnpm check` after changing plugin behavior or workspace tooling.

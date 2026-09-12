@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "tool-call-logger",
+      "name": "codex-tool-logger",
       "source": {
         "source": "local",
-        "path": "./plugins/tool-call-logger"
+        "path": "./plugins/codex-tool-logger"
       },
       "policy": {
         "installation": "AVAILABLE",

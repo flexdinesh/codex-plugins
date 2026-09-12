@@ -15,8 +15,8 @@
     "viewer:docker": "docker compose up --build -d --wait viewer",
     "viewer:docker:stop": "docker compose down",
     "viewer:docker:logs": "docker compose logs -f viewer",
-    "new": "node scripts/workspace.ts new",
-    "link": "node scripts/workspace.ts link"
+    "new:codex": "node scripts/workspace.ts new-codex",
+    "link:codex": "node scripts/workspace.ts link-codex"
   },
   "devDependencies": {
     "@types/node": "26.4.1",

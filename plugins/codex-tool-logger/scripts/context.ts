@@ -83,7 +83,7 @@ export function collectMetadata(event: Record<string, unknown>, git: GitRunner =
   const transcript = cwd ? optional('transcript', () => transcriptContext(event.transcript_path, cwd)) : null;
   return {
     collector: {
-      name: 'tool-call-logger', version: optional('plugin_version', pluginVersion),
+      name: 'codex-tool-logger', version: optional('plugin_version', pluginVersion),
       node_version: process.version, executable: process.execPath,
       pid: process.pid, parent_pid: process.ppid, cwd: hookCwd,
       plugin_root: resolve(import.meta.dirname, '..'),

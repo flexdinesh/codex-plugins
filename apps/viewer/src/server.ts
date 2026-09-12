@@ -115,7 +115,7 @@ function allowedDevelopmentPath(path: string, viteEnvironment: string): boolean 
 export async function createViewer(
   options: { source?: string; demo?: boolean; dev?: boolean; buildDirectory?: string } = {},
 ) {
-  const source = options.source ?? logPath();
+  const source = options.source;
   const assets = options.dev ? undefined : productionAssets(options.buildDirectory ?? join(root, "dist"));
   let vite: ViteDevServer | undefined;
   let viteEnvironment = "";
@@ -147,7 +147,7 @@ export async function createViewer(
     }
     if (path === "/api/logs") {
       try {
-        pending ??= options.demo ? Promise.resolve(demoSnapshot()) : readLogs(source);
+        pending ??= options.demo ? Promise.resolve(demoSnapshot()) : readLogs(source ?? logPath());
         const snapshot = await pending;
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify(snapshot));

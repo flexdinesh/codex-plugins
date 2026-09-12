@@ -1,0 +1,6 @@
+{
+  "name": "opencode-tool-logger",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "26.x", "pnpm": "11.x" }
+}
