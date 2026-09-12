@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import {
   appendFileSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -12,11 +13,12 @@ import {
 } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
+import { testDataSnapshot, testLogPath } from "../src/demo.ts";
 import { groupCalls, logPath, readLogs } from "../src/logs.ts";
-import { callContext, displayPath, isSnapshot, matchesContext, recordContext, repositoryLabel } from "../src/model.ts";
+import { callContext, displayPath, isObject, isSnapshot, matchesContext, recordContext, repositoryLabel } from "../src/model.ts";
 import type { LogRecord } from "../src/model.ts";
 import { browserUrl, createViewer, interfaceUrls, openBrowser, shouldOpenBrowser } from "../src/server.ts";
 import { appendEvent } from '../../../plugins/codex-tool-logger/scripts/log-tool-call.ts';
@@ -26,6 +28,59 @@ function fixture(t: TestContext) {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return { directory, path: join(directory, "codex-tool-calls.jsonl") };
 }
+
+test("committed Codex test data is valid and covers viewer semantics", async () => {
+  const data = readFileSync(testLogPath, "utf8");
+  assert.ok(data.endsWith("\n"));
+  const records: unknown[] = data.trimEnd().split("\n").map((line) => JSON.parse(line));
+  const eventIds = new Set<string>();
+  for (const value of records) {
+    assert.ok(isObject(value));
+    assert.equal(value.schema_version, 2);
+    assert.match(String(value.event_id), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    eventIds.add(String(value.event_id));
+  }
+  assert.equal(eventIds.size, records.length);
+
+  const snapshot = await readLogs(testLogPath);
+  assert.equal(snapshot.missing, false);
+  assert.equal(snapshot.skipped, 0);
+  assert.equal(snapshot.totalEvents, records.length);
+  assert.equal(snapshot.calls.length, 8);
+  assert.equal(snapshot.homeDirectory, "/home/fixture-user");
+  assert.ok(snapshot.calls.some((call) => call.status === "completed"));
+  assert.ok(snapshot.calls.some((call) => call.status === "awaiting"));
+  assert.ok(snapshot.calls.some((call) => call.pre === null && call.post !== null));
+  assert.ok(new Set(snapshot.calls.map((call) => call.session)).size > 1);
+  assert.ok(new Set(snapshot.calls.map((call) => call.tool)).size > 2);
+  const roots = snapshot.calls.map(callContext).map((context) => context.root).filter(Boolean);
+  assert.ok(new Set(roots).size > 1);
+  assert.ok(roots.some((root, index) => roots.some((other, otherIndex) => index !== otherIndex && root !== other && basename(root) === basename(other))));
+  assert.ok(snapshot.calls.some((call) => call.pre && call.post
+    && callContext({ ...call, post: call.pre }).dirty === false
+    && callContext(call).dirty === true));
+  assert.ok(snapshot.calls.some((call) => callContext(call).error));
+  assert.ok(snapshot.calls.some((call) => isObject(call.output) && call.output.exit_code === 1));
+  assert.match(data, /🐟/u);
+  assert.match(data, /<script>/);
+});
+
+test("test-data timestamps rebase together without changing the fixture", async () => {
+  const original = readFileSync(testLogPath, "utf8");
+  const now = Date.parse("2030-01-02T03:04:05.000Z");
+  const snapshot = await testDataSnapshot(now);
+  const times = snapshot.calls.flatMap((call) => [call.pre?.logged_at, call.post?.logged_at])
+    .filter((value): value is string => value !== undefined).map((value) => Date.parse(value));
+  assert.equal(Math.max(...times), now);
+  for (const call of snapshot.calls) {
+    if (call.pre && call.post) {
+      assert.equal(Date.parse(call.post.logged_at) - Date.parse(call.pre.logged_at), call.durationMs);
+    }
+  }
+  assert.equal(snapshot.demo, true);
+  assert.equal(snapshot.source, "test-data/codex/codex-tool-calls.jsonl");
+  assert.equal(readFileSync(testLogPath, "utf8"), original);
+});
 
 test("prefers Codex logs and falls back to legacy logs without modifying either", (t) => {
   const f = fixture(t);
@@ -225,6 +280,35 @@ test('viewer raw events retain enriched logger records alongside legacy records'
   assert.deepEqual(snapshot.calls[0]?.post, stored);
 });
 
+test("logger appends to a fixture copy that the viewer reads without losing history", async (t) => {
+  const f = fixture(t);
+  copyFileSync(testLogPath, f.path);
+  const original = readFileSync(f.path, "utf8");
+  const before = await readLogs(f.path);
+  const event = {
+    cwd: f.directory,
+    session_id: "fixture-integration-session",
+    turn_id: "fixture-integration-turn",
+    tool_use_id: "fixture-integration-call",
+    tool_name: "Bash",
+    tool_input: { command: "pnpm check" },
+  };
+  appendEvent({ ...event, hook_event_name: "PreToolUse" }, f.directory);
+  appendEvent({
+    ...event,
+    hook_event_name: "PostToolUse",
+    tool_response: { exit_code: 0, stdout: "checks passed\n" },
+  }, f.directory);
+
+  const after = await readLogs(f.path);
+  assert.ok(readFileSync(f.path, "utf8").startsWith(original));
+  assert.equal(after.calls.length, before.calls.length + 1);
+  const appended = after.calls.find((call) => call.session === event.session_id);
+  assert.equal(appended?.status, "completed");
+  assert.deepEqual(appended?.input, event.tool_input);
+  assert.deepEqual(appended?.output, { exit_code: 0, stdout: "checks passed\n" });
+});
+
 test("bounds reading to a tail window and never parses cut-off lines", async (t) => {
   const f = fixture(t);
   const tail = record("PostToolUse", "s2");
@@ -368,8 +452,7 @@ test("production serves only compiled assets and never follows symlinks", async 
 });
 
 test("development transforms React with fresh CSP nonces and blocks backend files", async (t) => {
-  const f = fixture(t);
-  const base = await listen(t, { dev: true, source: f.path });
+  const base = await listen(t, { dev: true, testData: true });
   const page = await fetch(base);
   const html = await page.text();
   assert.equal(page.status, 200);
@@ -386,7 +469,10 @@ test("development transforms React with fresh CSP nonces and blocks backend file
   assert.match(client.headers.get("content-type") ?? "", /javascript/);
   assert.equal((await fetch(`${base}/@vite/client`)).status, 200);
   assert.equal((await fetch(`${base}/@react-refresh`)).status, 200);
-  assert.ok(isSnapshot(await (await fetch(`${base}/api/logs`)).json()));
+  const snapshot: unknown = await (await fetch(`${base}/api/logs`)).json();
+  assert.ok(isSnapshot(snapshot));
+  assert.equal(snapshot.calls.length, 8);
+  assert.equal(snapshot.demo, true);
   for (const path of ["/src/server.ts", "/src/logs.ts?raw", "/src/demo.ts", "/package.json", "/vite.config.ts", "/tests/viewer.test.ts", "/.env", "/@fs/etc/passwd", "/src/client/%2e%2e%2fserver.ts", "/node_modules/.vite/deps/_metadata.json"]) {
     assert.equal((await fetch(`${base}${path}`)).status, 404, path);
   }

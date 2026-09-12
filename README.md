@@ -53,6 +53,12 @@ pnpm --filter viewer build
 pnpm --filter viewer start
 ```
 
+`start` reads real logs from the configured state directory. For UI development,
+run `pnpm --filter viewer dev`; it reads the committed synthetic fixture at
+`test-data/codex/codex-tool-calls.jsonl` and rebases its timestamps to the current
+time. Run `pnpm --filter viewer test-data` to serve the same fixture from a
+production build.
+
 The direct server prints every IPv4 URL:
 
 ```text

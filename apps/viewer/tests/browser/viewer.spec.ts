@@ -53,6 +53,25 @@ async function mockSnapshot(page: Page, calls: ToolCall[]): Promise<void> {
   await expect(page.locator("#stat-calls")).toHaveText(String(calls.length));
 }
 
+test("committed Codex test data renders through the server", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#demo")).toHaveText("TEST DATA");
+  await expect(page.locator("#stat-calls")).toHaveText("8");
+  await expect(page.locator("#stat-completed")).toHaveText("7");
+  await expect(page.locator("#stat-awaiting")).toHaveText("1");
+  await expect(page.locator("#event-count")).toHaveText("14 events");
+  await expect(page.locator("#source")).toHaveText("test-data/codex/codex-tool-calls.jsonl");
+  await expect(page.locator("#rows > tr")).toHaveCount(8);
+  await expect(page.getByLabel("Filter by repository").locator("option")).toContainText([
+    "api — ~/archive/api",
+    "api — ~/work/clients/api",
+    "tool-logger",
+  ]);
+  await page.getByLabel("Filter by status").selectOption("awaiting");
+  await expect(page.locator("#rows > tr")).toHaveCount(1);
+  await expect(page.locator("#rows")).toContainText("notes.txt");
+});
+
 test("filters calls, updates statistics, resets and focuses search with /", async ({ page }) => {
   await mockSnapshot(page, [
     call(0),

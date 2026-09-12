@@ -18,7 +18,7 @@ export function ActivityHeading() {
         <p className="max-w-md text-sm leading-6 text-muted">Follow the work. See what happened, and what came back.</p>
       </div>
       <div className="heading-actions flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
-        <Badge id="demo" variant="warning" className="tracking-wide" hidden={!snapshot?.demo}>DEMO DATA</Badge>
+        <Badge id="demo" variant="warning" className="tracking-wide" hidden={!snapshot?.demo}>TEST DATA</Badge>
         <Button id="live" variant="outline" size="compact" className="live-button" aria-pressed={live} onClick={toggleLive}>
           <span className={`live-dot size-1.5 rounded-full ${live ? "bg-success shadow-live" : "bg-warning"}`} />
           <span id="live-label">{live ? "Live updates" : "Updates paused"}</span>

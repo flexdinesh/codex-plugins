@@ -6,7 +6,7 @@ import { isIP } from "node:net";
 import { networkInterfaces } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { demoSnapshot } from "./demo.ts";
+import { testDataSnapshot } from "./demo.ts";
 import { logPath, readLogs } from "./logs.ts";
 import type { Snapshot } from "./model.ts";
 import type { ViteDevServer } from "vite";
@@ -113,9 +113,10 @@ function allowedDevelopmentPath(path: string, viteEnvironment: string): boolean 
 }
 
 export async function createViewer(
-  options: { source?: string; demo?: boolean; dev?: boolean; buildDirectory?: string } = {},
+  options: { source?: string; demo?: boolean; testData?: boolean; dev?: boolean; buildDirectory?: string } = {},
 ) {
   const source = options.source;
+  const testData = options.testData === true || options.demo === true;
   const assets = options.dev ? undefined : productionAssets(options.buildDirectory ?? join(root, "dist"));
   let vite: ViteDevServer | undefined;
   let viteEnvironment = "";
@@ -147,7 +148,7 @@ export async function createViewer(
     }
     if (path === "/api/logs") {
       try {
-        pending ??= options.demo ? Promise.resolve(demoSnapshot()) : readLogs(source ?? logPath());
+        pending ??= testData ? testDataSnapshot() : readLogs(source ?? logPath());
         const snapshot = await pending;
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify(snapshot));
@@ -218,10 +219,10 @@ export async function createViewer(
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT ?? "4317");
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT must be between 1 and 65535");
-  const demo = process.argv.includes("--demo");
+  const testData = process.argv.includes("--test-data") || process.argv.includes("--demo");
   const dev = process.argv.includes("--dev");
   const host = process.env.HOST ?? "0.0.0.0";
-  const server = await createViewer({ demo, dev });
+  const server = await createViewer({ testData, dev });
   server.on("error", (error) => {
     console.error(`viewer: ${error.message}`);
     process.exitCode = 1;
@@ -234,7 +235,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   }
   server.listen(port, host, () => {
     const urls = host === "0.0.0.0" ? interfaceUrls(port) : [{ name: host, url: `http://${host}:${port}` }];
-    console.log(`Viewer${demo ? " (demo data)" : ""}${dev ? " (development)" : ""}:`);
+    console.log(`Viewer${testData ? " (test data)" : ""}${dev ? " (development)" : ""}:`);
     for (const entry of urls) console.log(`  ${entry.name}: ${entry.url}`);
     if (!shouldOpenBrowser()) {
       console.log("viewer: SSH session detected; skipping automatic browser opening");
